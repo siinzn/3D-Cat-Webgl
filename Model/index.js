@@ -21,7 +21,7 @@ const LIGHT_AMBIENT = vec3(0.3, 0.3, 0.3);
 const LIGHT_DIFFUSE = vec3(1.0, 1.0, 1.0);
 const LIGHT_SPECULAR = vec3(1.0, 1.0, 1.0);
 const MATERIAL_SHININESS = 60.0;
-
+const CYLINDER_SEGMENTS = 20;
 const TEST_COLOR = vec4(0.9, 1, 0.2, 1.0);
 
 // Variables
@@ -39,6 +39,7 @@ let lastMouseX = 0;
 let lastMouseY = 0;
 let aNormalLoc, uNormalMatrixLoc, uLightPosEyeLoc;
 let uAmbientLoc, uDiffuseLoc, uSpecularLoc, uShininessLoc, uSpecStrengthLoc;
+let boxMesh, cylinderMesh, coneMesh, ellipsoidMesh; // test meshes for 2.1
 
 window.onload = function init() {
   canvas = document.getElementById("gl-canvas");
@@ -90,6 +91,14 @@ window.onload = function init() {
     makeSphere(50, SPHERE_LAT_SEGMENTS, SPHERE_LONG_SEGMENTS),
   );
   floorMesh = createMesh(makeFloor(FLOOR_HALF_SIZE, FLOOR_Y));
+
+  // 2.1 test meshes (delete after you've checked them)
+  boxMesh = createMesh(makeBox(60, 40, 30));
+  cylinderMesh = createMesh(makeCylinder(20, 20, 80, CYLINDER_SEGMENTS));
+  coneMesh = createMesh(makeCylinder(25, 0, 60, CYLINDER_SEGMENTS));
+  ellipsoidMesh = createMesh(
+    makeEllipsoid(40, 60, 30, SPHERE_LAT_SEGMENTS, SPHERE_LONG_SEGMENTS),
+  );
 
   setupInput();
   render();
@@ -143,6 +152,13 @@ function drawMesh(mesh, modelMatrix, color, specStrength = 0.6) {
 
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.indexBuffer);
   gl.drawElements(gl.TRIANGLES, mesh.count, gl.UNSIGNED_SHORT, 0);
+}
+
+// Draws one body part. `matrix` is the part's position/rotation in the world and is
+// what children inherit. `size` stretches only this part's drawing and is NOT passed on.
+function drawPart(mesh, matrix, size, color, specStrength = 0.6) {
+  const drawMatrix = mult(matrix, scale(size[0], size[1], size[2]));
+  drawMesh(mesh, drawMatrix, color, specStrength);
 }
 
 function clamp(value, min, max) {
@@ -226,7 +242,28 @@ function render() {
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
   drawMesh(floorMesh, mat4(), FLOOR_COLOR, 0.1); // floor: nearly matte
-  drawMesh(sphereMesh, translate(0, 50, 0), TEST_COLOR, 0.8); // sphere: shiny
+  // ---- 2.2 demo: one body with two swinging legs (delete after you've checked it) ----
+  const t = performance.now() / 1000;
+  const swing = 30 * Math.sin(t * 2);
+
+  const bodyMatrix = translate(0, 140, 0);
+  drawPart(ellipsoidMesh, bodyMatrix, vec3(1, 1, 1), TEST_COLOR);
+
+  // left leg: move to the hip, swing around it, then shift down so the leg's top is at the hip
+  let hipL = mult(bodyMatrix, translate(20, -55, 0));
+  hipL = mult(hipL, rotateX(swing));
+  const legL = mult(hipL, translate(0, -40, 0));
+  drawPart(cylinderMesh, legL, vec3(1, 1, 1), TEST_COLOR);
+
+  // paw: a child of the left leg, so it follows the swing
+  const pawL = mult(legL, translate(0, -40, 0));
+  drawPart(sphereMesh, pawL, vec3(0.35, 0.2, 0.5), TEST_COLOR);
+
+  // right leg: opposite swing, thinner (size only affects this leg's drawing)
+  let hipR = mult(bodyMatrix, translate(-20, -55, 0));
+  hipR = mult(hipR, rotateX(-swing));
+  const legR = mult(hipR, translate(0, -40, 0));
+  drawPart(cylinderMesh, legR, vec3(0.6, 1, 0.6), TEST_COLOR);
 
   requestAnimationFrame(render);
 }
@@ -280,6 +317,137 @@ function makeFloor(halfSize, y) {
   const normals = [vec3(0, 1, 0), vec3(0, 1, 0), vec3(0, 1, 0), vec3(0, 1, 0)];
 
   const indices = [0, 2, 1, 0, 3, 2];
+
+  return { positions, normals, indices };
+}
+
+// Box centered at the origin. 24 vertices (4 per face) so each face has a flat normal.
+function makeBox(w, h, d) {
+  const x = w / 2,
+    y = h / 2,
+    z = d / 2;
+  const positions = [];
+  const normals = [];
+  const indices = [];
+
+  const faces = [
+    {
+      n: vec3(0, 0, 1),
+      v: [vec3(-x, -y, z), vec3(x, -y, z), vec3(x, y, z), vec3(-x, y, z)],
+    }, // front
+    {
+      n: vec3(0, 0, -1),
+      v: [vec3(x, -y, -z), vec3(-x, -y, -z), vec3(-x, y, -z), vec3(x, y, -z)],
+    }, // back
+    {
+      n: vec3(1, 0, 0),
+      v: [vec3(x, -y, z), vec3(x, -y, -z), vec3(x, y, -z), vec3(x, y, z)],
+    }, // right
+    {
+      n: vec3(-1, 0, 0),
+      v: [vec3(-x, -y, -z), vec3(-x, -y, z), vec3(-x, y, z), vec3(-x, y, -z)],
+    }, // left
+    {
+      n: vec3(0, 1, 0),
+      v: [vec3(-x, y, z), vec3(x, y, z), vec3(x, y, -z), vec3(-x, y, -z)],
+    }, // top
+    {
+      n: vec3(0, -1, 0),
+      v: [vec3(-x, -y, -z), vec3(x, -y, -z), vec3(x, -y, z), vec3(-x, -y, z)],
+    }, // bottom
+  ];
+
+  faces.forEach(function (f) {
+    const base = positions.length;
+    f.v.forEach(function (p) {
+      positions.push(p);
+      normals.push(f.n);
+    });
+    indices.push(base, base + 1, base + 2, base, base + 2, base + 3);
+  });
+
+  return { positions, normals, indices };
+}
+
+// Tapered cylinder along the y axis, centered at the origin.
+// topRadius = 0 gives a cone (apex pointing up). Equal radii give a plain cylinder.
+function makeCylinder(bottomRadius, topRadius, height, segments) {
+  const positions = [];
+  const normals = [];
+  const indices = [];
+  const h = height / 2;
+  const slope = (bottomRadius - topRadius) / height; // tilts side normals upward on a taper
+
+  // side: two rings (bottom and top), smooth normals
+  for (let i = 0; i <= segments; i++) {
+    const a = (2 * Math.PI * i) / segments;
+    const cx = Math.cos(a);
+    const cz = Math.sin(a);
+    const n = normalize(vec3(cx, slope, cz));
+
+    positions.push(vec3(bottomRadius * cx, -h, bottomRadius * cz));
+    normals.push(n);
+    positions.push(vec3(topRadius * cx, h, topRadius * cz));
+    normals.push(n);
+  }
+  for (let i = 0; i < segments; i++) {
+    const b = i * 2;
+    indices.push(b, b + 1, b + 2, b + 1, b + 3, b + 2);
+  }
+
+  // caps (skipped when that radius is 0, like a cone's tip)
+  const caps = [
+    { y: -h, r: bottomRadius, ny: -1 },
+    { y: h, r: topRadius, ny: 1 },
+  ];
+  caps.forEach(function (cap) {
+    if (cap.r <= 0) return;
+    const center = positions.length;
+    positions.push(vec3(0, cap.y, 0));
+    normals.push(vec3(0, cap.ny, 0));
+    for (let i = 0; i <= segments; i++) {
+      const a = (2 * Math.PI * i) / segments;
+      positions.push(vec3(cap.r * Math.cos(a), cap.y, cap.r * Math.sin(a)));
+      normals.push(vec3(0, cap.ny, 0));
+    }
+    for (let i = 0; i < segments; i++) {
+      indices.push(center, center + 1 + i, center + 2 + i);
+    }
+  });
+
+  return { positions, normals, indices };
+}
+
+// Sphere stretched to different radii on each axis (body, head, paws, eyes).
+function makeEllipsoid(rx, ry, rz, latSegments, longSegments) {
+  const positions = [];
+  const normals = [];
+  const indices = [];
+
+  for (let i = 0; i <= latSegments; i++) {
+    const theta = (Math.PI * i) / latSegments;
+    const sinT = Math.sin(theta);
+    const cosT = Math.cos(theta);
+
+    for (let j = 0; j <= longSegments; j++) {
+      const phi = (2 * Math.PI * j) / longSegments;
+      const nx = sinT * Math.cos(phi);
+      const ny = cosT;
+      const nz = sinT * Math.sin(phi);
+
+      positions.push(vec3(rx * nx, ry * ny, rz * nz));
+      normals.push(normalize(vec3(nx / rx, ny / ry, nz / rz))); // not the same as the position direction
+    }
+  }
+
+  for (let i = 0; i < latSegments; i++) {
+    for (let j = 0; j < longSegments; j++) {
+      const first = i * (longSegments + 1) + j;
+      const second = first + longSegments + 1;
+      indices.push(first, second, first + 1);
+      indices.push(second, second + 1, first + 1);
+    }
+  }
 
   return { positions, normals, indices };
 }
