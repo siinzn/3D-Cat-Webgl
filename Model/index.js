@@ -16,6 +16,11 @@ const CAMERA_MAX_ELEVATION = 85; //stops it flipping over the top
 const CAMERA_ORBIT_SENSITIVITY = 0.4; // degrees per pixel dragged
 const CAMERA_ZOOM_SENSITIVITY = 0.5; // distance per wheel unit
 const CAMERA_TARGET = vec3(0, 50, 0); // point the camera looks at
+const LIGHT_POSITION = vec3(250, 400, 250); // world space
+const LIGHT_AMBIENT = vec3(0.3, 0.3, 0.3);
+const LIGHT_DIFFUSE = vec3(1.0, 1.0, 1.0);
+const LIGHT_SPECULAR = vec3(1.0, 1.0, 1.0);
+const MATERIAL_SHININESS = 60.0;
 
 const TEST_COLOR = vec4(0.9, 1, 0.2, 1.0);
 
@@ -32,6 +37,8 @@ let cameraDistance = CAMERA_START_DISTANCE;
 let isDragging = false;
 let lastMouseX = 0;
 let lastMouseY = 0;
+let aNormalLoc, uNormalMatrixLoc, uLightPosEyeLoc;
+let uAmbientLoc, uDiffuseLoc, uSpecularLoc, uShininessLoc, uSpecStrengthLoc;
 
 window.onload = function init() {
   canvas = document.getElementById("gl-canvas");
@@ -53,6 +60,21 @@ window.onload = function init() {
   uModelViewLoc = gl.getUniformLocation(program, "uModelView");
   uProjectionLoc = gl.getUniformLocation(program, "uProjection");
   uColorLoc = gl.getUniformLocation(program, "uColor");
+
+  aNormalLoc = gl.getAttribLocation(program, "aNormal");
+  uNormalMatrixLoc = gl.getUniformLocation(program, "uNormalMatrix");
+  uLightPosEyeLoc = gl.getUniformLocation(program, "uLightPosEye");
+  uAmbientLoc = gl.getUniformLocation(program, "uAmbient");
+  uDiffuseLoc = gl.getUniformLocation(program, "uDiffuse");
+  uSpecularLoc = gl.getUniformLocation(program, "uSpecular");
+  uShininessLoc = gl.getUniformLocation(program, "uShininess");
+  uSpecStrengthLoc = gl.getUniformLocation(program, "uSpecStrength");
+
+  // light colors and shininess never change, so send them once
+  gl.uniform3fv(uAmbientLoc, flatten(LIGHT_AMBIENT));
+  gl.uniform3fv(uDiffuseLoc, flatten(LIGHT_DIFFUSE));
+  gl.uniform3fv(uSpecularLoc, flatten(LIGHT_SPECULAR));
+  gl.uniform1f(uShininessLoc, MATERIAL_SHININESS);
 
   // projection never changes, so send it once
   projectionMatrix = perspective(
@@ -79,6 +101,10 @@ function createMesh(data) {
   gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, flatten(data.positions), gl.STATIC_DRAW);
 
+  const normalBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, normalBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, flatten(data.normals), gl.STATIC_DRAW);
+
   const indexBuffer = gl.createBuffer();
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, indexBuffer);
   gl.bufferData(
@@ -87,18 +113,33 @@ function createMesh(data) {
     gl.STATIC_DRAW,
   );
 
-  return { positionBuffer, indexBuffer, count: data.indices.length };
+  return {
+    positionBuffer,
+    normalBuffer,
+    indexBuffer,
+    count: data.indices.length,
+  };
 }
 
-// Draws one mesh with a model matrix and a color.
-function drawMesh(mesh, modelMatrix, color) {
+// specStrength: 0 = matte, 1 = very shiny
+function drawMesh(mesh, modelMatrix, color, specStrength = 0.6) {
   const modelView = mult(viewMatrix, modelMatrix);
   gl.uniformMatrix4fv(uModelViewLoc, false, flatten(modelView));
+  gl.uniformMatrix3fv(
+    uNormalMatrixLoc,
+    false,
+    flatten(normalMatrix(modelView, true)),
+  );
   gl.uniform4fv(uColorLoc, flatten(color));
+  gl.uniform1f(uSpecStrengthLoc, specStrength);
 
   gl.bindBuffer(gl.ARRAY_BUFFER, mesh.positionBuffer);
   gl.vertexAttribPointer(aPositionLoc, 3, gl.FLOAT, false, 0, 0);
   gl.enableVertexAttribArray(aPositionLoc);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, mesh.normalBuffer);
+  gl.vertexAttribPointer(aNormalLoc, 3, gl.FLOAT, false, 0, 0);
+  gl.enableVertexAttribArray(aNormalLoc);
 
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.indexBuffer);
   gl.drawElements(gl.TRIANGLES, mesh.count, gl.UNSIGNED_SHORT, 0);
@@ -120,6 +161,22 @@ function updateCamera() {
   );
 
   viewMatrix = lookAt(eye, CAMERA_TARGET, vec3(0, 1, 0));
+}
+
+// The shader works in eye space, so the world-space light must be moved
+// into eye space every frame (the camera moves, so the result changes).
+function uploadLight() {
+  const p = [LIGHT_POSITION[0], LIGHT_POSITION[1], LIGHT_POSITION[2], 1.0];
+  const eyeLight = [];
+  for (let row = 0; row < 3; row++) {
+    eyeLight.push(
+      viewMatrix[row][0] * p[0] +
+        viewMatrix[row][1] * p[1] +
+        viewMatrix[row][2] * p[2] +
+        viewMatrix[row][3] * p[3],
+    );
+  }
+  gl.uniform3fv(uLightPosEyeLoc, new Float32Array(eyeLight));
 }
 
 function setupInput() {
@@ -165,10 +222,11 @@ function setupInput() {
 
 function render() {
   updateCamera();
+  uploadLight();
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-  drawMesh(floorMesh, mat4(), FLOOR_COLOR);
-  drawMesh(sphereMesh, translate(0, 50, 0), TEST_COLOR); // radius 50, so it rests on the floor
+  drawMesh(floorMesh, mat4(), FLOOR_COLOR, 0.1); // floor: nearly matte
+  drawMesh(sphereMesh, translate(0, 50, 0), TEST_COLOR, 0.8); // sphere: shiny
 
   requestAnimationFrame(render);
 }
