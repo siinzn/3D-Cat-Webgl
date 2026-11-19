@@ -15,7 +15,7 @@ const CAMERA_MIN_ELEVATION = 5; //stops the camera going under the floor
 const CAMERA_MAX_ELEVATION = 85; //stops it flipping over the top
 const CAMERA_ORBIT_SENSITIVITY = 0.4; // degrees per pixel dragged
 const CAMERA_ZOOM_SENSITIVITY = 0.5; // distance per wheel unit
-const CAMERA_TARGET = vec3(0, 50, 0); // point the camera looks at
+const CAMERA_TARGET = vec3(0, 80, 0);
 const LIGHT_POSITION = vec3(250, 400, 250); // world space
 const LIGHT_AMBIENT = vec3(0.3, 0.3, 0.3);
 const LIGHT_DIFFUSE = vec3(1.0, 1.0, 1.0);
@@ -23,6 +23,38 @@ const LIGHT_SPECULAR = vec3(1.0, 1.0, 1.0);
 const MATERIAL_SHININESS = 60.0;
 const CYLINDER_SEGMENTS = 20;
 const TEST_COLOR = vec4(0.9, 1, 0.2, 1.0);
+// CAT
+const CAT_BODY_RADII = vec3(18, 26, 15);
+const CAT_HEAD_RADII = vec3(38, 31, 30);
+const CAT_LEG_LENGTH = 24;
+const CAT_LEG_RADIUS = 5;
+const CAT_LEG_SPACING = 8; // x distance of each leg from the center line
+const CAT_PAW_RADII = vec3(7, 5, 11);
+const CAT_PAW_FORWARD = 4; // paws sit slightly ahead of the leg
+const CAT_HIP_Y = CAT_LEG_LENGTH + CAT_PAW_RADII[1]; // keeps the feet exactly on the floor
+const CAT_BODY_CENTER_Y = CAT_HIP_Y + 14;
+const CAT_HEAD_OFFSET_Y = 48; // head center above body center
+const CAT_ARM_RADII = vec3(6, 20, 8);
+const CAT_ARM_OFFSET = vec3(17, 4, 0); // x is mirrored for each side
+const CAT_EAR_SIZE = vec3(14, 50, 7); // base radius x, height, base radius z (flat ears)
+const CAT_EAR_OFFSET = vec3(22, 45, 0);
+const CAT_EAR_TILT = 15; // degrees outward
+const CAT_EYE_RADII = vec3(13, 11, 6);
+const CAT_EYE_OFFSET = vec3(15, 2, 25);
+const CAT_PUPIL_RADII = vec3(3, 7, 2.5);
+const CAT_PUPIL_OFFSET = vec3(0, 0, 5);
+const CAT_TAIL_BASE = vec3(0, -12, -13); // relative to the body center
+const CAT_TAIL_SEGMENTS = 5;
+const CAT_TAIL_SEGMENT_LENGTH = 14;
+const CAT_TAIL_RADIUS = 4.5;
+const CAT_TAIL_START_ANGLE = -80; // degrees: points backward
+const CAT_TAIL_BEND = 24; // degrees added per segment, curls it upward
+const CAT_SPEC_STRENGTH = 0.8;
+
+// COLORS
+const CAT_COLOR = vec4(0.16, 0.16, 0.18, 1.0); // dark grey, not pure black
+const EYE_COLOR = vec4(0.92, 0.92, 0.92, 1.0);
+const PUPIL_COLOR = vec4(0.02, 0.02, 0.02, 1.0);
 
 // Variables
 let canvas;
@@ -40,6 +72,11 @@ let lastMouseY = 0;
 let aNormalLoc, uNormalMatrixLoc, uLightPosEyeLoc;
 let uAmbientLoc, uDiffuseLoc, uSpecularLoc, uShininessLoc, uSpecStrengthLoc;
 let boxMesh, cylinderMesh, coneMesh, ellipsoidMesh; // test meshes for 2.1
+// cat
+let catPosition = vec3(0, FLOOR_Y, 0);
+let catHeading = 0; // degrees, 0 = facing +z
+let legAngleLeft = 0;
+let legAngleRight = 0;
 
 window.onload = function init() {
   canvas = document.getElementById("gl-canvas");
@@ -161,6 +198,171 @@ function drawPart(mesh, matrix, size, color, specStrength = 0.6) {
   drawMesh(mesh, drawMatrix, color, specStrength);
 }
 
+// The base meshes were built big (so their vertices are outside NDC range).
+// These turn the real sizes above into scale factors. They must match how
+// the meshes are created in init:
+//   sphereMesh   = makeSphere(50, ...)
+//   cylinderMesh = makeCylinder(20, 20, 80, ...)
+//   coneMesh     = makeCylinder(25, 0, 60, ...)
+function sphereScale(radii) {
+  return vec3(radii[0] / 50, radii[1] / 50, radii[2] / 50);
+}
+
+function cylinderScale(radius, height) {
+  return vec3(radius / 20, height / 80, radius / 20);
+}
+
+function coneScale(size) {
+  return vec3(size[0] / 25, size[1] / 60, size[2] / 25);
+}
+
+// Draws the whole cat. Each part's matrix is built from its parent's matrix.
+function drawCat() {
+  const root = mult(
+    translate(catPosition[0], catPosition[1], catPosition[2]),
+    rotateY(catHeading),
+  );
+
+  // body
+  const body = mult(root, translate(0, CAT_BODY_CENTER_Y, 0));
+  drawPart(
+    sphereMesh,
+    body,
+    sphereScale(CAT_BODY_RADII),
+    CAT_COLOR,
+    CAT_SPEC_STRENGTH,
+  );
+
+  // arms (side = -1 or +1 mirrors everything left/right)
+  [-1, 1].forEach(function (side) {
+    const arm = mult(
+      body,
+      translate(side * CAT_ARM_OFFSET[0], CAT_ARM_OFFSET[1], CAT_ARM_OFFSET[2]),
+    );
+    drawPart(
+      sphereMesh,
+      arm,
+      sphereScale(CAT_ARM_RADII),
+      CAT_COLOR,
+      CAT_SPEC_STRENGTH,
+    );
+  });
+
+  // head
+  const head = mult(body, translate(0, CAT_HEAD_OFFSET_Y, 0));
+  drawPart(
+    sphereMesh,
+    head,
+    sphereScale(CAT_HEAD_RADII),
+    CAT_COLOR,
+    CAT_SPEC_STRENGTH,
+  );
+
+  [-1, 1].forEach(function (side) {
+    // ears
+    const ear = mult(
+      mult(
+        head,
+        translate(
+          side * CAT_EAR_OFFSET[0],
+          CAT_EAR_OFFSET[1],
+          CAT_EAR_OFFSET[2],
+        ),
+      ),
+      rotateZ(-side * CAT_EAR_TILT),
+    );
+    drawPart(
+      coneMesh,
+      ear,
+      coneScale(CAT_EAR_SIZE),
+      CAT_COLOR,
+      CAT_SPEC_STRENGTH,
+    );
+
+    // eyes
+    const eye = mult(
+      head,
+      translate(side * CAT_EYE_OFFSET[0], CAT_EYE_OFFSET[1], CAT_EYE_OFFSET[2]),
+    );
+    drawPart(sphereMesh, eye, sphereScale(CAT_EYE_RADII), EYE_COLOR, 0.3);
+
+    // pupils are children of the eyes
+    const pupil = mult(
+      eye,
+      translate(CAT_PUPIL_OFFSET[0], CAT_PUPIL_OFFSET[1], CAT_PUPIL_OFFSET[2]),
+    );
+    drawPart(sphereMesh, pupil, sphereScale(CAT_PUPIL_RADII), PUPIL_COLOR, 0.9);
+  });
+
+  // legs: children of the root, not the body, so they stay planted when the body bobs later
+  const legs = [
+    { x: CAT_LEG_SPACING, angle: legAngleLeft },
+    { x: -CAT_LEG_SPACING, angle: legAngleRight },
+  ];
+  legs.forEach(function (leg) {
+    // hip = pivot point. Rotating here swings the leg from the top.
+    const hip = mult(
+      mult(root, translate(leg.x, CAT_HIP_Y, 0)),
+      rotateX(leg.angle),
+    );
+
+    const legMatrix = mult(hip, translate(0, -CAT_LEG_LENGTH / 2, 0));
+    drawPart(
+      cylinderMesh,
+      legMatrix,
+      cylinderScale(CAT_LEG_RADIUS, CAT_LEG_LENGTH),
+      CAT_COLOR,
+      CAT_SPEC_STRENGTH,
+    );
+
+    const paw = mult(hip, translate(0, -CAT_LEG_LENGTH, CAT_PAW_FORWARD));
+    drawPart(
+      sphereMesh,
+      paw,
+      sphereScale(CAT_PAW_RADII),
+      CAT_COLOR,
+      CAT_SPEC_STRENGTH,
+    );
+  });
+
+  // tail: a chain, each segment bends a little more than the one before it
+  const tailBall = vec3(CAT_TAIL_RADIUS, CAT_TAIL_RADIUS, CAT_TAIL_RADIUS);
+  let joint = mult(
+    mult(body, translate(CAT_TAIL_BASE[0], CAT_TAIL_BASE[1], CAT_TAIL_BASE[2])),
+    rotateX(CAT_TAIL_START_ANGLE),
+  );
+  for (let i = 0; i < CAT_TAIL_SEGMENTS; i++) {
+    if (i > 0) joint = mult(joint, rotateX(CAT_TAIL_BEND));
+
+    // a ball at each joint fills the gap that opens on the outside of a bend
+    drawPart(
+      sphereMesh,
+      joint,
+      sphereScale(tailBall),
+      CAT_COLOR,
+      CAT_SPEC_STRENGTH,
+    );
+
+    const segment = mult(joint, translate(0, CAT_TAIL_SEGMENT_LENGTH / 2, 0));
+    drawPart(
+      cylinderMesh,
+      segment,
+      cylinderScale(CAT_TAIL_RADIUS, CAT_TAIL_SEGMENT_LENGTH),
+      CAT_COLOR,
+      CAT_SPEC_STRENGTH,
+    );
+
+    joint = mult(joint, translate(0, CAT_TAIL_SEGMENT_LENGTH, 0));
+  }
+  drawPart(
+    sphereMesh,
+    joint,
+    sphereScale(tailBall),
+    CAT_COLOR,
+    CAT_SPEC_STRENGTH,
+  ); // rounded tip
+}
+
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
@@ -242,29 +444,11 @@ function render() {
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
   drawMesh(floorMesh, mat4(), FLOOR_COLOR, 0.1); // floor: nearly matte
-  // ---- 2.2 demo: one body with two swinging legs (delete after you've checked it) ----
-  const t = performance.now() / 1000;
-  const swing = 30 * Math.sin(t * 2);
+  // temporary leg test, delete after checking the hips pivot correctly
+  legAngleLeft = 25 * Math.sin(performance.now() / 300);
+  legAngleRight = -legAngleLeft;
 
-  const bodyMatrix = translate(0, 140, 0);
-  drawPart(ellipsoidMesh, bodyMatrix, vec3(1, 1, 1), TEST_COLOR);
-
-  // left leg: move to the hip, swing around it, then shift down so the leg's top is at the hip
-  let hipL = mult(bodyMatrix, translate(20, -55, 0));
-  hipL = mult(hipL, rotateX(swing));
-  const legL = mult(hipL, translate(0, -40, 0));
-  drawPart(cylinderMesh, legL, vec3(1, 1, 1), TEST_COLOR);
-
-  // paw: a child of the left leg, so it follows the swing
-  const pawL = mult(legL, translate(0, -40, 0));
-  drawPart(sphereMesh, pawL, vec3(0.35, 0.2, 0.5), TEST_COLOR);
-
-  // right leg: opposite swing, thinner (size only affects this leg's drawing)
-  let hipR = mult(bodyMatrix, translate(-20, -55, 0));
-  hipR = mult(hipR, rotateX(-swing));
-  const legR = mult(hipR, translate(0, -40, 0));
-  drawPart(cylinderMesh, legR, vec3(0.6, 1, 0.6), TEST_COLOR);
-
+  drawCat();
   requestAnimationFrame(render);
 }
 
