@@ -55,6 +55,19 @@ const CAT_SPEC_STRENGTH = 0.8;
 const CAT_COLOR = vec4(0.16, 0.16, 0.18, 1.0); // dark grey, not pure black
 const EYE_COLOR = vec4(0.92, 0.92, 0.92, 1.0);
 const PUPIL_COLOR = vec4(0.02, 0.02, 0.02, 1.0);
+const CLICK_DRAG_THRESHOLD_PX = 5; // moved less than this = click, more = drag
+// WORLD (add below FLOOR_Y)
+const FLOOR_EDGE_MARGIN = 20; // the cat can't be sent closer than this to the floor's edge
+const TARGET_MARKER_COLOR = vec4(1.0, 0.8, 0.2, 1.0);
+const TARGET_MARKER_RADIUS = 10;
+
+// CAT (add to this group)
+const CAT_WALK_SPEED = 120; // world units per second
+const CAT_WALK_THRESHOLD = 2; // closer than this to the target = arrived
+
+// GL (add to this group)
+const MAX_FRAME_TIME = 0.1; // seconds; stops a huge jump after switching browser tabs
+const CAT_TURN_SPEED = 360; // degrees per second
 
 // Variables
 let canvas;
@@ -77,6 +90,11 @@ let catPosition = vec3(0, FLOOR_Y, 0);
 let catHeading = 0; // degrees, 0 = facing +z
 let legAngleLeft = 0;
 let legAngleRight = 0;
+let mouseDownX = 0;
+let mouseDownY = 0;
+let catTarget = null; // vec3 on the floor, or null if there's no target yet
+let catIsWalking = false;
+let lastFrameTime = 0;
 
 window.onload = function init() {
   canvas = document.getElementById("gl-canvas");
@@ -138,7 +156,7 @@ window.onload = function init() {
   );
 
   setupInput();
-  render();
+  requestAnimationFrame(render);
 };
 
 // Uploads positions and indices to the GPU. Returns handles to draw later.
@@ -363,6 +381,35 @@ function drawCat() {
   ); // rounded tip
 }
 
+// Moves the cat toward catTarget on the floor plane (x and z only).
+function updateCat(dt) {
+  if (!catIsWalking || catTarget === null) return;
+
+  const dx = catTarget[0] - catPosition[0];
+  const dz = catTarget[2] - catPosition[2];
+  const dist = Math.hypot(dx, dz);
+
+  // arrived: snap to the target and stop
+  if (dist <= CAT_WALK_THRESHOLD) {
+    catPosition[0] = catTarget[0];
+    catPosition[2] = catTarget[2];
+    catIsWalking = false;
+    return;
+  }
+
+  // --- turn toward the target ---
+  const desiredHeading = (Math.atan2(dx, dz) * 180) / Math.PI;
+  let diff = desiredHeading - catHeading;
+  diff = ((((diff + 180) % 360) + 360) % 360) - 180; // wrap into -180..180 (shortest way round)
+  const maxTurn = CAT_TURN_SPEED * dt;
+  catHeading += clamp(diff, -maxTurn, maxTurn); // turn, but never past the target angle
+
+  // --- walk toward the target ---
+  const step = Math.min(CAT_WALK_SPEED * dt, dist);
+  catPosition[0] += (dx / dist) * step;
+  catPosition[2] += (dz / dist) * step;
+}
+
 function clamp(value, min, max) {
   return Math.min(Math.max(value, min), max);
 }
@@ -399,13 +446,22 @@ function uploadLight() {
 
 function setupInput() {
   canvas.addEventListener("mousedown", function (e) {
+    if (e.button !== 0) return; // left button only
     isDragging = true;
     lastMouseX = e.clientX;
     lastMouseY = e.clientY;
+    mouseDownX = e.clientX; // remember where the press started
+    mouseDownY = e.clientY;
   });
 
-  window.addEventListener("mouseup", function () {
+  window.addEventListener("mouseup", function (e) {
+    if (e.button !== 0 || !isDragging) return;
     isDragging = false;
+
+    const moved = Math.hypot(e.clientX - mouseDownX, e.clientY - mouseDownY);
+    if (moved < CLICK_DRAG_THRESHOLD_PX) {
+      onCanvasClick(e.clientX, e.clientY);
+    }
   });
 
   window.addEventListener("mousemove", function (e) {
@@ -438,17 +494,88 @@ function setupInput() {
   );
 }
 
-function render() {
+// Called only for real clicks (not drags). Converts the mouse position to
+// canvas pixel coordinates, with (0,0) at the canvas's top-left corner.
+function onCanvasClick(clientX, clientY) {
+  const rect = canvas.getBoundingClientRect();
+  const px = (clientX - rect.left) * (canvas.width / rect.width);
+  const py = (clientY - rect.top) * (canvas.height / rect.height);
+
+  const point = screenToFloor(px, py);
+  if (point === null) return; // clicked the sky or somewhere invalid
+
+  catTarget = point;
+  catIsWalking = true;
+  console.log("target:", point[0].toFixed(1), point[2].toFixed(1));
+}
+
+// Multiplies a 4x4 matrix by the point (x, y, z, 1), then divides by w.
+function unproject(inv, ndcX, ndcY, ndcZ) {
+  const v = [ndcX, ndcY, ndcZ, 1.0];
+  const out = [0, 0, 0, 0];
+  for (let row = 0; row < 4; row++) {
+    out[row] =
+      inv[row][0] * v[0] +
+      inv[row][1] * v[1] +
+      inv[row][2] * v[2] +
+      inv[row][3] * v[3];
+  }
+  return vec3(out[0] / out[3], out[1] / out[3], out[2] / out[3]);
+}
+
+// Canvas pixel -> point on the floor (or null if the click doesn't hit it).
+function screenToFloor(px, py) {
+  // 1. pixel -> NDC (-1..1, with y flipped because pixels count downward)
+  const ndcX = (2 * px) / canvas.width - 1;
+  const ndcY = 1 - (2 * py) / canvas.height;
+
+  // 2. undo projection and view to get two world-space points on the click's ray
+  const inv = inverse(mult(projectionMatrix, viewMatrix));
+  const near = unproject(inv, ndcX, ndcY, -1); // on the near plane
+  const far = unproject(inv, ndcX, ndcY, 1); // on the far plane
+
+  // 3. where does that line cross the plane y = FLOOR_Y?
+  const dy = far[1] - near[1];
+  if (Math.abs(dy) < 1e-6) return null; // line parallel to the floor
+  const t = (FLOOR_Y - near[1]) / dy;
+  if (t < 0 || t > 1) return null; // floor isn't between near and far (sky click)
+
+  // 4. keep the point on the floor, away from the edge
+  const limit = FLOOR_HALF_SIZE - FLOOR_EDGE_MARGIN;
+  const x = clamp(near[0] + t * (far[0] - near[0]), -limit, limit);
+  const z = clamp(near[2] + t * (far[2] - near[2]), -limit, limit);
+
+  return vec3(x, FLOOR_Y, z);
+}
+
+function render(now) {
+  const dt = Math.min((now - lastFrameTime) / 1000, MAX_FRAME_TIME);
+  lastFrameTime = now;
+
+  updateCat(dt);
   updateCamera();
   uploadLight();
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
-  drawMesh(floorMesh, mat4(), FLOOR_COLOR, 0.1); // floor: nearly matte
-  // temporary leg test, delete after checking the hips pivot correctly
-  legAngleLeft = 25 * Math.sin(performance.now() / 300);
+  drawMesh(floorMesh, mat4(), FLOOR_COLOR, 0.1);
+
+  // temporary leg test (Phase 4 replaces this with a proper walk cycle)
+  legAngleLeft = 25 * Math.sin(now / 300);
   legAngleRight = -legAngleLeft;
 
   drawCat();
+
+  // target marker: only shown while the cat is on its way
+  if (catTarget !== null && catIsWalking) {
+    drawPart(
+      cylinderMesh,
+      translate(catTarget[0], FLOOR_Y + 0.5, catTarget[2]),
+      cylinderScale(TARGET_MARKER_RADIUS, 1),
+      TARGET_MARKER_COLOR,
+      0.2,
+    );
+  }
+
   requestAnimationFrame(render);
 }
 
