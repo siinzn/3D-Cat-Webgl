@@ -69,6 +69,13 @@ const CAT_WALK_THRESHOLD = 2; // closer than this to the target = arrived
 const MAX_FRAME_TIME = 0.1; // seconds; stops a huge jump after switching browser tabs
 const CAT_TURN_SPEED = 360; // degrees per second
 
+const CAT_LEG_MAX_ANGLE = 35; // degrees
+const CAT_SWING_SPEED = 13; // radians per second of walk cycle
+const CAT_BLEND_SPEED = 8; // how fast legs ease in/out (per second)
+const CAT_BOB_HEIGHT = 3; // world units
+const CAT_TAIL_SWAY_ANGLE = 14; // degrees, left/right
+const CAT_TAIL_SWAY_SPEED = 2.5; // radians per second
+
 // Variables
 let canvas;
 let gl;
@@ -95,6 +102,11 @@ let mouseDownY = 0;
 let catTarget = null; // vec3 on the floor, or null if there's no target yet
 let catIsWalking = false;
 let lastFrameTime = 0;
+let walkPhase = 0;
+let legBlend = 0; // 0 = standing, 1 = full walk
+let animTime = 0; // total running time in seconds
+let catBob = 0;
+let tailSway = 0; // degrees
 
 window.onload = function init() {
   canvas = document.getElementById("gl-canvas");
@@ -242,7 +254,7 @@ function drawCat() {
   );
 
   // body
-  const body = mult(root, translate(0, CAT_BODY_CENTER_Y, 0));
+  const body = mult(root, translate(0, CAT_BODY_CENTER_Y + catBob, 0));
   drawPart(
     sphereMesh,
     body,
@@ -346,7 +358,13 @@ function drawCat() {
   // tail: a chain, each segment bends a little more than the one before it
   const tailBall = vec3(CAT_TAIL_RADIUS, CAT_TAIL_RADIUS, CAT_TAIL_RADIUS);
   let joint = mult(
-    mult(body, translate(CAT_TAIL_BASE[0], CAT_TAIL_BASE[1], CAT_TAIL_BASE[2])),
+    mult(
+      mult(
+        body,
+        translate(CAT_TAIL_BASE[0], CAT_TAIL_BASE[1], CAT_TAIL_BASE[2]),
+      ),
+      rotateY(tailSway),
+    ),
     rotateX(CAT_TAIL_START_ANGLE),
   );
   for (let i = 0; i < CAT_TAIL_SEGMENTS; i++) {
@@ -408,6 +426,29 @@ function updateCat(dt) {
   const step = Math.min(CAT_WALK_SPEED * dt, dist);
   catPosition[0] += (dx / dist) * step;
   catPosition[2] += (dz / dist) * step;
+}
+
+function updateAnimation(dt) {
+  animTime += dt;
+
+  // ease legBlend toward 1 while walking, toward 0 while standing
+  const goal = catIsWalking ? 1 : 0;
+  const maxChange = CAT_BLEND_SPEED * dt;
+  legBlend += clamp(goal - legBlend, -maxChange, maxChange);
+
+  // the cycle only runs while there's something to animate
+  if (legBlend > 0) walkPhase += CAT_SWING_SPEED * dt;
+
+  // legs: opposite swings
+  const swing = Math.sin(walkPhase) * CAT_LEG_MAX_ANGLE * legBlend;
+  legAngleLeft = swing;
+  legAngleRight = -swing;
+
+  // body bob: highest when the legs pass each other, lowest when they're spread
+  catBob = Math.cos(walkPhase * 2) * CAT_BOB_HEIGHT * legBlend;
+
+  // tail sways all the time
+  tailSway = Math.sin(animTime * CAT_TAIL_SWAY_SPEED) * CAT_TAIL_SWAY_ANGLE;
 }
 
 function clamp(value, min, max) {
@@ -553,19 +594,14 @@ function render(now) {
   lastFrameTime = now;
 
   updateCat(dt);
+  updateAnimation(dt);
   updateCamera();
   uploadLight();
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
 
   drawMesh(floorMesh, mat4(), FLOOR_COLOR, 0.1);
-
-  // temporary leg test (Phase 4 replaces this with a proper walk cycle)
-  legAngleLeft = 25 * Math.sin(now / 300);
-  legAngleRight = -legAngleLeft;
-
   drawCat();
 
-  // target marker: only shown while the cat is on its way
   if (catTarget !== null && catIsWalking) {
     drawPart(
       cylinderMesh,
