@@ -39,9 +39,15 @@
       uniform vec3 uSpecular;
       uniform float uShininess;
       uniform float uSpecStrength;
+      uniform float uUnlit;
       out vec4 fragColor;
 
       void main() {
+        if (uUnlit > 0.5) {
+          fragColor = uColor;
+          return;
+        }
+
         vec3 N = normalize(vNormalEye);
         vec3 L = normalize(uLightPosEye - vPosEye);
         vec3 V = normalize(-vPosEye);

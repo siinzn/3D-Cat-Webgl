@@ -16,7 +16,7 @@ const CAMERA_MAX_ELEVATION = 85; //stops it flipping over the top
 const CAMERA_ORBIT_SENSITIVITY = 0.4; // degrees per pixel dragged
 const CAMERA_ZOOM_SENSITIVITY = 0.5; // distance per wheel unit
 const CAMERA_TARGET = vec3(0, 80, 0);
-const LIGHT_POSITION = vec3(250, 400, 250); // world space
+const LIGHT_POSITION = vec3(150, 450, 150);
 const LIGHT_AMBIENT = vec3(0.3, 0.3, 0.3);
 const LIGHT_DIFFUSE = vec3(1.0, 1.0, 1.0);
 const LIGHT_SPECULAR = vec3(1.0, 1.0, 1.0);
@@ -75,6 +75,10 @@ const CAT_BLEND_SPEED = 8; // how fast legs ease in/out (per second)
 const CAT_BOB_HEIGHT = 3; // world units
 const CAT_TAIL_SWAY_ANGLE = 14; // degrees, left/right
 const CAT_TAIL_SWAY_SPEED = 2.5; // radians per second
+// SHADOW
+const SHADOW_COLOR = vec3(0, 0, 0);
+const SHADOW_ALPHA = 0.9;
+const SHADOW_Y_OFFSET = 0.6; // lifts the shadow off the floor to avoid flicker
 
 // Variables
 let canvas;
@@ -107,10 +111,13 @@ let legBlend = 0; // 0 = standing, 1 = full walk
 let animTime = 0; // total running time in seconds
 let catBob = 0;
 let tailSway = 0; // degrees
+let uUnlitLoc;
+let shadowPass = false;
+let shadowMatrix;
 
 window.onload = function init() {
   canvas = document.getElementById("gl-canvas");
-  gl = canvas.getContext("webgl2");
+  gl = canvas.getContext("webgl2", { stencil: true });
   if (!gl) {
     alert("WebGL 2 isn't available");
     return;
@@ -128,6 +135,7 @@ window.onload = function init() {
   uModelViewLoc = gl.getUniformLocation(program, "uModelView");
   uProjectionLoc = gl.getUniformLocation(program, "uProjection");
   uColorLoc = gl.getUniformLocation(program, "uColor");
+  uUnlitLoc = gl.getUniformLocation(program, "uUnlit");
 
   aNormalLoc = gl.getAttribLocation(program, "aNormal");
   uNormalMatrixLoc = gl.getUniformLocation(program, "uNormalMatrix");
@@ -199,15 +207,21 @@ function createMesh(data) {
 
 // specStrength: 0 = matte, 1 = very shiny
 function drawMesh(mesh, modelMatrix, color, specStrength = 0.6) {
-  const modelView = mult(viewMatrix, modelMatrix);
+  let m = modelMatrix;
+  if (shadowPass) m = mult(shadowMatrix, modelMatrix); // flatten onto the floor
+
+  const modelView = mult(viewMatrix, m);
   gl.uniformMatrix4fv(uModelViewLoc, false, flatten(modelView));
-  gl.uniformMatrix3fv(
-    uNormalMatrixLoc,
-    false,
-    flatten(normalMatrix(modelView, true)),
-  );
-  gl.uniform4fv(uColorLoc, flatten(color));
-  gl.uniform1f(uSpecStrengthLoc, specStrength);
+
+  if (!shadowPass) {
+    gl.uniformMatrix3fv(
+      uNormalMatrixLoc,
+      false,
+      flatten(normalMatrix(modelView, true)),
+    );
+    gl.uniform4fv(uColorLoc, flatten(color));
+    gl.uniform1f(uSpecStrengthLoc, specStrength);
+  }
 
   gl.bindBuffer(gl.ARRAY_BUFFER, mesh.positionBuffer);
   gl.vertexAttribPointer(aPositionLoc, 3, gl.FLOAT, false, 0, 0);
@@ -397,6 +411,65 @@ function drawCat() {
     CAT_COLOR,
     CAT_SPEC_STRENGTH,
   ); // rounded tip
+}
+
+// Matrix that projects any point onto the plane y = h, along the line from the light through it.
+function buildShadowMatrix() {
+  const lx = LIGHT_POSITION[0];
+  const lz = LIGHT_POSITION[2];
+  const h = FLOOR_Y + SHADOW_Y_OFFSET;
+  const ly = LIGHT_POSITION[1] - h; // light height measured from the shadow plane
+
+  const s = mat4();
+  s[0][0] = ly;
+  s[0][1] = -lx;
+  s[0][2] = 0;
+  s[0][3] = 0;
+  s[1][0] = 0;
+  s[1][1] = 0;
+  s[1][2] = 0;
+  s[1][3] = 0; // y becomes 0: flat
+  s[2][0] = 0;
+  s[2][1] = -lz;
+  s[2][2] = ly;
+  s[2][3] = 0;
+  s[3][0] = 0;
+  s[3][1] = -1;
+  s[3][2] = 0;
+  s[3][3] = ly; // w = ly - y
+
+  // shift the plane down to y = 0, project, shift back up
+  return mult(translate(0, h, 0), mult(s, translate(0, -h, 0)));
+}
+
+function drawShadow() {
+  shadowMatrix = buildShadowMatrix();
+  shadowPass = true;
+
+  gl.uniform1f(uUnlitLoc, 1.0); // flat color, no lighting
+  gl.uniform4f(
+    uColorLoc,
+    SHADOW_COLOR[0],
+    SHADOW_COLOR[1],
+    SHADOW_COLOR[2],
+    SHADOW_ALPHA,
+  );
+
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.depthMask(false); // shadow never blocks anything
+
+  gl.enable(gl.STENCIL_TEST);
+  gl.stencilFunc(gl.EQUAL, 0, 0xff); // only draw where nothing was drawn yet
+  gl.stencilOp(gl.KEEP, gl.KEEP, gl.INCR); // then mark the pixel as done
+
+  drawCat();
+
+  gl.disable(gl.STENCIL_TEST);
+  gl.depthMask(true);
+  gl.disable(gl.BLEND);
+  gl.uniform1f(uUnlitLoc, 0.0);
+  shadowPass = false;
 }
 
 // Moves the cat toward catTarget on the floor plane (x and z only).
@@ -597,9 +670,10 @@ function render(now) {
   updateAnimation(dt);
   updateCamera();
   uploadLight();
-  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
 
   drawMesh(floorMesh, mat4(), FLOOR_COLOR, 0.1);
+  drawShadow(); // new: after the floor, before the cat
   drawCat();
 
   if (catTarget !== null && catIsWalking) {
