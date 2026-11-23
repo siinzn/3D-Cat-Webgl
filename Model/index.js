@@ -80,6 +80,17 @@ const SHADOW_COLOR = vec3(0, 0, 0);
 const SHADOW_ALPHA = 0.9;
 const SHADOW_Y_OFFSET = 0.6; // lifts the shadow off the floor to avoid flicker
 
+// COLORS (add below FLOOR_COLOR)
+const FLOOR_COLOR_B = vec4(0.17, 0.19, 0.24, 1.0);   // the second checker color; FLOOR_COLOR is the first
+
+// WORLD (add below FLOOR_EDGE_MARGIN)
+const FLOOR_CHECK_SIZE = 50;                          // tile size; 600 / 50 = 12 tiles each way
+
+// LIGHT (add to this group)
+const RIM_POWER = 3.0;                                // higher = thinner rim
+const RIM_STRENGTH = 0.9;
+const RIM_COLOR = vec3(0.45, 0.55, 0.9);
+
 // Variables
 let canvas;
 let gl;
@@ -115,6 +126,9 @@ let uUnlitLoc;
 let shadowPass = false;
 let shadowMatrix;
 
+let uColor2Loc, uPatternLoc, uCheckSizeLoc;
+let uRimStrengthLoc, uRimPowerLoc, uRimColorLoc;
+
 window.onload = function init() {
   canvas = document.getElementById("gl-canvas");
   gl = canvas.getContext("webgl2", { stencil: true });
@@ -136,6 +150,19 @@ window.onload = function init() {
   uProjectionLoc = gl.getUniformLocation(program, "uProjection");
   uColorLoc = gl.getUniformLocation(program, "uColor");
   uUnlitLoc = gl.getUniformLocation(program, "uUnlit");
+
+    uColor2Loc = gl.getUniformLocation(program, "uColor2");
+  uPatternLoc = gl.getUniformLocation(program, "uPattern");
+  uCheckSizeLoc = gl.getUniformLocation(program, "uCheckSize");
+  uRimStrengthLoc = gl.getUniformLocation(program, "uRimStrength");
+  uRimPowerLoc = gl.getUniformLocation(program, "uRimPower");
+  uRimColorLoc = gl.getUniformLocation(program, "uRimColor");
+
+  // these never change, so send them once
+  gl.uniform4fv(uColor2Loc, flatten(FLOOR_COLOR_B));
+  gl.uniform1f(uCheckSizeLoc, FLOOR_CHECK_SIZE);
+  gl.uniform1f(uRimPowerLoc, RIM_POWER);
+  gl.uniform3fv(uRimColorLoc, flatten(RIM_COLOR));
 
   aNormalLoc = gl.getAttribLocation(program, "aNormal");
   uNormalMatrixLoc = gl.getUniformLocation(program, "uNormalMatrix");
@@ -672,18 +699,24 @@ function render(now) {
   uploadLight();
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
 
+    // floor: checkerboard on, rim off
+  gl.uniform1f(uPatternLoc, 1.0);
+  gl.uniform1f(uRimStrengthLoc, 0.0);
   drawMesh(floorMesh, mat4(), FLOOR_COLOR, 0.1);
-  drawShadow(); // new: after the floor, before the cat
+  gl.uniform1f(uPatternLoc, 0.0);
+
+  drawShadow();
+
+  // cat: rim light on
+  gl.uniform1f(uRimStrengthLoc, RIM_STRENGTH);
   drawCat();
+  gl.uniform1f(uRimStrengthLoc, 0.0);
 
   if (catTarget !== null && catIsWalking) {
-    drawPart(
-      cylinderMesh,
-      translate(catTarget[0], FLOOR_Y + 0.5, catTarget[2]),
-      cylinderScale(TARGET_MARKER_RADIUS, 1),
-      TARGET_MARKER_COLOR,
-      0.2,
-    );
+    drawPart(cylinderMesh,
+             translate(catTarget[0], FLOOR_Y + 0.5, catTarget[2]),
+             cylinderScale(TARGET_MARKER_RADIUS, 1),
+             TARGET_MARKER_COLOR, 0.2);
   }
 
   requestAnimationFrame(render);
