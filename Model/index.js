@@ -41,8 +41,7 @@ const CAT_EAR_OFFSET = vec3(22, 45, 0);
 const CAT_EAR_TILT = 15; // degrees outward
 const CAT_EYE_RADII = vec3(13, 11, 6);
 const CAT_EYE_OFFSET = vec3(15, 2, 25);
-const CAT_PUPIL_RADII = vec3(3, 7, 2.5);
-const CAT_PUPIL_OFFSET = vec3(0, 0, 5);
+const CAT_PUPIL_RADII = vec3(3, 7, 2.5); // only x and y are used: the pupil is painted by the shader
 const CAT_TAIL_BASE = vec3(0, -12, -13); // relative to the body center
 const CAT_TAIL_SEGMENTS = 5;
 const CAT_TAIL_SEGMENT_LENGTH = 14;
@@ -90,6 +89,18 @@ const FLOOR_CHECK_SIZE = 50;                          // tile size; 600 / 50 = 1
 const RIM_POWER = 3.0;                                // higher = thinner rim
 const RIM_STRENGTH = 0.9;
 const RIM_COLOR = vec3(0.45, 0.55, 0.9);
+const TOON_LEVELS = 4; // diffuse bands on the cat; 0 turns toon shading off
+const FILL_LIGHT_DIRECTION = vec3(-0.6, 0.4, -0.7); // world space, points toward the fill light
+const FILL_LIGHT_COLOR = vec3(0.18, 0.2, 0.28); // weak and slightly blue
+const SPHERE_MESH_RADIUS = 50; // radius sphereMesh is built with (makeSphere(50, ...))
+
+// CAT (click reaction)
+const CAT_PICK_RADIUS = 60; // bounding sphere used to detect clicks on the cat
+const CAT_PICK_CENTER_Y = 80; // height of that sphere's center above the cat's feet
+const CAT_JUMP_HEIGHT = 40; // world units
+const CAT_JUMP_DURATION = 0.6; // seconds
+const CAT_WIGGLE_ANGLE = 30; // extra tail swing (degrees) while jumping
+const CAT_WIGGLE_SPEED = 25; // radians per second
 
 // Variables
 let canvas;
@@ -128,6 +139,9 @@ let shadowMatrix;
 
 let uColor2Loc, uPatternLoc, uCheckSizeLoc;
 let uRimStrengthLoc, uRimPowerLoc, uRimColorLoc;
+let uToonLevelsLoc, uFillDirEyeLoc;
+let catJumpTime = -1; // seconds into the current jump, -1 = not jumping
+let catJumpHeight = 0;
 
 window.onload = function init() {
   canvas = document.getElementById("gl-canvas");
@@ -163,6 +177,28 @@ window.onload = function init() {
   gl.uniform1f(uCheckSizeLoc, FLOOR_CHECK_SIZE);
   gl.uniform1f(uRimPowerLoc, RIM_POWER);
   gl.uniform3fv(uRimColorLoc, flatten(RIM_COLOR));
+
+  uToonLevelsLoc = gl.getUniformLocation(program, "uToonLevels");
+  uFillDirEyeLoc = gl.getUniformLocation(program, "uFillDirEye");
+  gl.uniform3fv(
+    gl.getUniformLocation(program, "uFillColor"),
+    flatten(FILL_LIGHT_COLOR),
+  );
+
+  // procedural pupil: its size as a fraction of the eye's radius
+  gl.uniform2f(
+    gl.getUniformLocation(program, "uPupilSize"),
+    CAT_PUPIL_RADII[0] / CAT_EYE_RADII[0],
+    CAT_PUPIL_RADII[1] / CAT_EYE_RADII[1],
+  );
+  gl.uniform4fv(
+    gl.getUniformLocation(program, "uPupilColor"),
+    flatten(PUPIL_COLOR),
+  );
+  gl.uniform1f(
+    gl.getUniformLocation(program, "uMeshRadius"),
+    SPHERE_MESH_RADIUS,
+  );
 
   aNormalLoc = gl.getAttribLocation(program, "aNormal");
   uNormalMatrixLoc = gl.getUniformLocation(program, "uNormalMatrix");
@@ -290,7 +326,7 @@ function coneScale(size) {
 // Draws the whole cat. Each part's matrix is built from its parent's matrix.
 function drawCat() {
   const root = mult(
-    translate(catPosition[0], catPosition[1], catPosition[2]),
+    translate(catPosition[0], catPosition[1] + catJumpHeight, catPosition[2]),
     rotateY(catHeading),
   );
 
@@ -350,19 +386,14 @@ function drawCat() {
       CAT_SPEC_STRENGTH,
     );
 
-    // eyes
+    // eyes: white spheres, the pupil is painted on by the fragment shader (uPattern 2)
     const eye = mult(
       head,
       translate(side * CAT_EYE_OFFSET[0], CAT_EYE_OFFSET[1], CAT_EYE_OFFSET[2]),
     );
-    drawPart(sphereMesh, eye, sphereScale(CAT_EYE_RADII), EYE_COLOR, 0.3);
-
-    // pupils are children of the eyes
-    const pupil = mult(
-      eye,
-      translate(CAT_PUPIL_OFFSET[0], CAT_PUPIL_OFFSET[1], CAT_PUPIL_OFFSET[2]),
-    );
-    drawPart(sphereMesh, pupil, sphereScale(CAT_PUPIL_RADII), PUPIL_COLOR, 0.9);
+    gl.uniform1f(uPatternLoc, 2.0);
+    drawPart(sphereMesh, eye, sphereScale(CAT_EYE_RADII), EYE_COLOR, 0.9);
+    gl.uniform1f(uPatternLoc, 0.0);
   });
 
   // legs: children of the root, not the body, so they stay planted when the body bobs later
@@ -547,8 +578,27 @@ function updateAnimation(dt) {
   // body bob: highest when the legs pass each other, lowest when they're spread
   catBob = Math.cos(walkPhase * 2) * CAT_BOB_HEIGHT * legBlend;
 
-  // tail sways all the time
-  tailSway = Math.sin(animTime * CAT_TAIL_SWAY_SPEED) * CAT_TAIL_SWAY_ANGLE;
+  // jump: one half sine wave, up and back down, over CAT_JUMP_DURATION
+  if (catJumpTime >= 0) {
+    catJumpTime += dt;
+    const t = catJumpTime / CAT_JUMP_DURATION;
+    if (t >= 1) {
+      catJumpTime = -1;
+      catJumpHeight = 0;
+    } else {
+      catJumpHeight = Math.sin(Math.PI * t) * CAT_JUMP_HEIGHT;
+    }
+  }
+  const jumpAmount = catJumpHeight / CAT_JUMP_HEIGHT; // 0..1, peaks mid-jump
+
+  // tail sways all the time, plus a fast wiggle while jumping
+  tailSway =
+    Math.sin(animTime * CAT_TAIL_SWAY_SPEED) * CAT_TAIL_SWAY_ANGLE +
+    Math.sin(animTime * CAT_WIGGLE_SPEED) * CAT_WIGGLE_ANGLE * jumpAmount;
+}
+
+function startJump() {
+  if (catJumpTime < 0) catJumpTime = 0; // ignore clicks while already in the air
 }
 
 function clamp(value, min, max) {
@@ -583,6 +633,18 @@ function uploadLight() {
     );
   }
   gl.uniform3fv(uLightPosEyeLoc, new Float32Array(eyeLight));
+
+  // the fill light is a direction (w = 0), so only the view's rotation applies
+  const d = FILL_LIGHT_DIRECTION;
+  const eyeFill = [];
+  for (let row = 0; row < 3; row++) {
+    eyeFill.push(
+      viewMatrix[row][0] * d[0] +
+        viewMatrix[row][1] * d[1] +
+        viewMatrix[row][2] * d[2],
+    );
+  }
+  gl.uniform3fv(uFillDirEyeLoc, new Float32Array(eyeFill));
 }
 
 function setupInput() {
@@ -642,7 +704,15 @@ function onCanvasClick(clientX, clientY) {
   const px = (clientX - rect.left) * (canvas.width / rect.width);
   const py = (clientY - rect.top) * (canvas.height / rect.height);
 
-  const point = screenToFloor(px, py);
+  const ray = screenToRay(px, py);
+
+  // clicking the cat makes it jump instead of walking
+  if (rayHitsCat(ray)) {
+    startJump();
+    return;
+  }
+
+  const point = rayToFloor(ray);
   if (point === null) return; // clicked the sky or somewhere invalid
 
   catTarget = point;
@@ -664,24 +734,48 @@ function unproject(inv, ndcX, ndcY, ndcZ) {
   return vec3(out[0] / out[3], out[1] / out[3], out[2] / out[3]);
 }
 
-// Canvas pixel -> point on the floor (or null if the click doesn't hit it).
-function screenToFloor(px, py) {
-  // 1. pixel -> NDC (-1..1, with y flipped because pixels count downward)
+// Canvas pixel -> the click's ray in world space, as two points (near and far plane).
+function screenToRay(px, py) {
+  // pixel -> NDC (-1..1, with y flipped because pixels count downward)
   const ndcX = (2 * px) / canvas.width - 1;
   const ndcY = 1 - (2 * py) / canvas.height;
 
-  // 2. undo projection and view to get two world-space points on the click's ray
+  // undo projection and view
   const inv = inverse(mult(projectionMatrix, viewMatrix));
-  const near = unproject(inv, ndcX, ndcY, -1); // on the near plane
-  const far = unproject(inv, ndcX, ndcY, 1); // on the far plane
+  return {
+    near: unproject(inv, ndcX, ndcY, -1),
+    far: unproject(inv, ndcX, ndcY, 1),
+  };
+}
 
-  // 3. where does that line cross the plane y = FLOOR_Y?
+// Ray vs the cat's bounding sphere. Solves |near + t*dir - center|^2 = r^2 for t.
+function rayHitsCat(ray) {
+  const center = vec3(
+    catPosition[0],
+    catPosition[1] + catJumpHeight + CAT_PICK_CENTER_Y,
+    catPosition[2],
+  );
+  const dir = normalize(subtract(ray.far, ray.near));
+  const oc = subtract(ray.near, center);
+  const b = dot(oc, dir);
+  const c = dot(oc, oc) - CAT_PICK_RADIUS * CAT_PICK_RADIUS;
+  const disc = b * b - c;
+  if (disc < 0) return false; // the line misses the sphere
+  return -b + Math.sqrt(disc) >= 0; // and the sphere isn't behind the camera
+}
+
+// The click's ray -> point on the floor (or null if it doesn't hit the floor).
+function rayToFloor(ray) {
+  const near = ray.near;
+  const far = ray.far;
+
+  // where does that line cross the plane y = FLOOR_Y?
   const dy = far[1] - near[1];
   if (Math.abs(dy) < 1e-6) return null; // line parallel to the floor
   const t = (FLOOR_Y - near[1]) / dy;
   if (t < 0 || t > 1) return null; // floor isn't between near and far (sky click)
 
-  // 4. keep the point on the floor, away from the edge
+  // keep the point on the floor, away from the edge
   const limit = FLOOR_HALF_SIZE - FLOOR_EDGE_MARGIN;
   const x = clamp(near[0] + t * (far[0] - near[0]), -limit, limit);
   const z = clamp(near[2] + t * (far[2] - near[2]), -limit, limit);
@@ -707,10 +801,12 @@ function render(now) {
 
   drawShadow();
 
-  // cat: rim light on
+  // cat: rim light and toon shading on
   gl.uniform1f(uRimStrengthLoc, RIM_STRENGTH);
+  gl.uniform1f(uToonLevelsLoc, TOON_LEVELS);
   drawCat();
   gl.uniform1f(uRimStrengthLoc, 0.0);
+  gl.uniform1f(uToonLevelsLoc, 0.0);
 
   if (catTarget !== null && catIsWalking) {
     drawPart(cylinderMesh,
