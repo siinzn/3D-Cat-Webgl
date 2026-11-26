@@ -102,6 +102,51 @@ const CAT_JUMP_DURATION = 0.6; // seconds
 const CAT_WIGGLE_ANGLE = 30; // extra tail swing (degrees) while jumping
 const CAT_WIGGLE_SPEED = 25; // radians per second
 
+// SCENE
+// Fixed layout, placed so nothing overlaps and the middle stays clear for the cat.
+const CRATES = [
+  { x: -150, z: 80, size: 40, turn: 15 },
+  { x: -120, z: 115, size: 28, turn: -25 },
+  { x: 230, z: 60, size: 36, turn: 40 },
+];
+const CRATE_COLOR = vec4(0.6, 0.44, 0.24, 1.0);
+
+// moving light: orbits the y axis at the starting light's height and distance
+const LIGHT_ORBIT_SPEED = 25; // degrees per second
+const LIGHT_ORBIT_RADIUS = Math.hypot(LIGHT_POSITION[0], LIGHT_POSITION[2]);
+const LIGHT_START_ANGLE =
+  (Math.atan2(LIGHT_POSITION[2], LIGHT_POSITION[0]) * 180) / Math.PI;
+const LIGHT_MARKER_RADIUS = 12; // the small glowing ball drawn where the light is
+
+// day / night presets (N key switches between them)
+const DAY = {
+  clear: CLEAR_COLOR,
+  ambient: LIGHT_AMBIENT,
+  diffuse: LIGHT_DIFFUSE,
+  fill: FILL_LIGHT_COLOR,
+  marker: vec4(1.0, 0.92, 0.6, 1.0), // sun
+};
+const NIGHT = {
+  clear: vec4(0.02, 0.03, 0.07, 1.0),
+  ambient: vec3(0.08, 0.09, 0.14),
+  diffuse: vec3(0.45, 0.52, 0.75),
+  fill: vec3(0.05, 0.06, 0.12),
+  marker: vec4(0.8, 0.85, 1.0, 1.0), // moon
+};
+
+// TEXTURES
+const GRASS_TEXTURE_UNIT = 0; // texture slot the grass image lives in
+const GRASS_IMAGE_URL = "./textures/grass.jpg";
+const GRASS_FALLBACK_COLOR = vec4(0.32, 0.45, 0.22, 1.0); // plain green until the image loads
+const GRASS_TILE_SIZE = 80; // world units covered by one copy of the image
+const GRASS_MACRO_SCALE = 0.13; // a second, much larger copy hides the repeating pattern
+const GRASS_MACRO_MIX = 0.35; // how much of that large copy is blended in
+const MAX_ANISOTROPY = 8;
+
+// CAMERA (reset with the R key)
+const CAMERA_START_AZIMUTH = 30;
+const CAMERA_START_ELEVATION = 25;
+
 // Variables
 let canvas;
 let gl;
@@ -109,15 +154,15 @@ let program;
 let aPositionLoc, uModelViewLoc, uProjectionLoc, uColorLoc;
 let sphereMesh, floorMesh;
 let viewMatrix, projectionMatrix;
-let cameraAzimuth = 30; // degrees around the cat
-let cameraElevation = 25; // degrees above the floor
+let cameraAzimuth = CAMERA_START_AZIMUTH; // degrees around the cat
+let cameraElevation = CAMERA_START_ELEVATION; // degrees above the floor
 let cameraDistance = CAMERA_START_DISTANCE;
 let isDragging = false;
 let lastMouseX = 0;
 let lastMouseY = 0;
 let aNormalLoc, uNormalMatrixLoc, uLightPosEyeLoc;
 let uAmbientLoc, uDiffuseLoc, uSpecularLoc, uShininessLoc, uSpecStrengthLoc;
-let boxMesh, cylinderMesh, coneMesh, ellipsoidMesh; // test meshes for 2.1
+let boxMesh, cylinderMesh, coneMesh, ellipsoidMesh;
 // cat
 let catPosition = vec3(0, FLOOR_Y, 0);
 let catHeading = 0; // degrees, 0 = facing +z
@@ -143,6 +188,20 @@ let uToonLevelsLoc, uFillDirEyeLoc;
 let catJumpTime = -1; // seconds into the current jump, -1 = not jumping
 let catJumpHeight = 0;
 
+// scene / keyboard toggles
+let uFillColorLoc;
+let lightPosition = vec3(LIGHT_POSITION[0], LIGHT_POSITION[1], LIGHT_POSITION[2]);
+let lightAngle = LIGHT_START_ANGLE; // degrees around the y axis
+let lightOrbiting = false; // L key
+let isNight = false; // N key
+let shadowEnabled = true; // S key
+let rimEnabled = true; // G key
+let toonEnabled = true; // T key
+
+// textures
+let aTexCoordLoc;
+let grassEnabled = true; // C key: grass image texture vs procedural checkerboard
+
 window.onload = function init() {
   canvas = document.getElementById("gl-canvas");
   gl = canvas.getContext("webgl2", { stencil: true });
@@ -152,7 +211,6 @@ window.onload = function init() {
   }
 
   gl.viewport(0, 0, canvas.width, canvas.height);
-  gl.clearColor(CLEAR_COLOR[0], CLEAR_COLOR[1], CLEAR_COLOR[2], CLEAR_COLOR[3]);
   gl.enable(gl.DEPTH_TEST);
 
   // shaders
@@ -180,10 +238,7 @@ window.onload = function init() {
 
   uToonLevelsLoc = gl.getUniformLocation(program, "uToonLevels");
   uFillDirEyeLoc = gl.getUniformLocation(program, "uFillDirEye");
-  gl.uniform3fv(
-    gl.getUniformLocation(program, "uFillColor"),
-    flatten(FILL_LIGHT_COLOR),
-  );
+  uFillColorLoc = gl.getUniformLocation(program, "uFillColor");
 
   // procedural pupil: its size as a fraction of the eye's radius
   gl.uniform2f(
@@ -209,9 +264,9 @@ window.onload = function init() {
   uShininessLoc = gl.getUniformLocation(program, "uShininess");
   uSpecStrengthLoc = gl.getUniformLocation(program, "uSpecStrength");
 
-  // light colors and shininess never change, so send them once
-  gl.uniform3fv(uAmbientLoc, flatten(LIGHT_AMBIENT));
-  gl.uniform3fv(uDiffuseLoc, flatten(LIGHT_DIFFUSE));
+  // specular and shininess never change, so send them once.
+  // ambient, diffuse, fill and clear color depend on day/night (applyTimeOfDay)
+  applyTimeOfDay();
   gl.uniform3fv(uSpecularLoc, flatten(LIGHT_SPECULAR));
   gl.uniform1f(uShininessLoc, MATERIAL_SHININESS);
 
@@ -230,17 +285,68 @@ window.onload = function init() {
   );
   floorMesh = createMesh(makeFloor(FLOOR_HALF_SIZE, FLOOR_Y));
 
-  // 2.1 test meshes (delete after you've checked them)
-  boxMesh = createMesh(makeBox(60, 40, 30));
+  // more primitives (cat parts, scene objects)
+  boxMesh = createMesh(makeBox(50, 50, 50)); // cube, used for crates
   cylinderMesh = createMesh(makeCylinder(20, 20, 80, CYLINDER_SEGMENTS));
   coneMesh = createMesh(makeCylinder(25, 0, 60, CYLINDER_SEGMENTS));
   ellipsoidMesh = createMesh(
     makeEllipsoid(40, 60, 30, SPHERE_LAT_SEGMENTS, SPHERE_LONG_SEGMENTS),
   );
 
+  // grass on the floor: repeats across the ground
+  aTexCoordLoc = gl.getAttribLocation(program, "aTexCoord");
+  gl.uniform1i(gl.getUniformLocation(program, "uGrass"), GRASS_TEXTURE_UNIT);
+  gl.uniform1f(gl.getUniformLocation(program, "uGrassMacroScale"), GRASS_MACRO_SCALE);
+  gl.uniform1f(gl.getUniformLocation(program, "uGrassMacroMix"), GRASS_MACRO_MIX);
+  loadTexture(GRASS_IMAGE_URL, GRASS_TEXTURE_UNIT, GRASS_FALLBACK_COLOR,
+    gl.REPEAT, gl.REPEAT);
+
   setupInput();
   requestAnimationFrame(render);
 };
+
+// Creates a texture on the given unit and starts loading the image into it.
+// Until the image arrives (or if it fails), the texture is one pixel of fallbackColor,
+// so the scene always draws. Returns the texture right away.
+function loadTexture(url, unit, fallbackColor, wrapS, wrapT) {
+  const texture = gl.createTexture();
+  gl.activeTexture(gl.TEXTURE0 + unit);
+  gl.bindTexture(gl.TEXTURE_2D, texture);
+  const c = fallbackColor;
+  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
+    new Uint8Array([c[0] * 255, c[1] * 255, c[2] * 255, 255]));
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
+
+  const image = new Image();
+  image.onload = function () {
+    try {
+      gl.activeTexture(gl.TEXTURE0 + unit);
+      gl.bindTexture(gl.TEXTURE_2D, texture);
+      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, image);
+      gl.generateMipmap(gl.TEXTURE_2D); // smaller copies for when it's seen from far away
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrapS);
+      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrapT);
+
+      // anisotropic filtering keeps the ground sharp at low viewing angles
+      const aniso = gl.getExtension("EXT_texture_filter_anisotropic");
+      if (aniso) {
+        const max = gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT);
+        gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT,
+          Math.min(MAX_ANISOTROPY, max));
+      }
+    } catch (err) {
+      // opening index.html straight from disk (file://) blocks images in WebGL
+      console.warn("Texture " + url + " blocked; run the page from a local server.", err);
+    }
+  };
+  image.onerror = function () {
+    console.warn("Texture not found: " + url);
+  };
+  image.src = url;
+  return texture;
+}
 
 // Uploads positions and indices to the GPU. Returns handles to draw later.
 function createMesh(data) {
@@ -260,9 +366,18 @@ function createMesh(data) {
     gl.STATIC_DRAW,
   );
 
+  // texture coordinates are optional: only textured meshes (the floor) have them
+  let texCoordBuffer = null;
+  if (data.texCoords) {
+    texCoordBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, texCoordBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, flatten(data.texCoords), gl.STATIC_DRAW);
+  }
+
   return {
     positionBuffer,
     normalBuffer,
+    texCoordBuffer,
     indexBuffer,
     count: data.indices.length,
   };
@@ -294,6 +409,14 @@ function drawMesh(mesh, modelMatrix, color, specStrength = 0.6) {
   gl.vertexAttribPointer(aNormalLoc, 3, gl.FLOAT, false, 0, 0);
   gl.enableVertexAttribArray(aNormalLoc);
 
+  if (mesh.texCoordBuffer) {
+    gl.bindBuffer(gl.ARRAY_BUFFER, mesh.texCoordBuffer);
+    gl.vertexAttribPointer(aTexCoordLoc, 2, gl.FLOAT, false, 0, 0);
+    gl.enableVertexAttribArray(aTexCoordLoc);
+  } else {
+    gl.disableVertexAttribArray(aTexCoordLoc); // the shader then reads (0, 0)
+  }
+
   gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, mesh.indexBuffer);
   gl.drawElements(gl.TRIANGLES, mesh.count, gl.UNSIGNED_SHORT, 0);
 }
@@ -321,6 +444,43 @@ function cylinderScale(radius, height) {
 
 function coneScale(size) {
   return vec3(size[0] / 25, size[1] / 60, size[2] / 25);
+}
+
+//   boxMesh      = makeBox(50, 50, 50)
+function boxScale(size) {
+  return vec3(size[0] / 50, size[1] / 50, size[2] / 50);
+}
+
+// Scene props (crates). Everything sits on the floor (y = FLOOR_Y).
+function drawScene() {
+  CRATES.forEach(function (crate) {
+    const m = mult(
+      translate(crate.x, FLOOR_Y + crate.size / 2, crate.z),
+      rotateY(crate.turn),
+    );
+    drawPart(
+      boxMesh,
+      m,
+      boxScale(vec3(crate.size, crate.size, crate.size)),
+      CRATE_COLOR,
+      0.1,
+    );
+  });
+}
+
+// Small unlit ball where the light is, so you can see it move.
+function drawLightMarker() {
+  const preset = isNight ? NIGHT : DAY;
+  gl.uniform1f(uUnlitLoc, 1.0);
+  drawPart(
+    sphereMesh,
+    translate(lightPosition[0], lightPosition[1], lightPosition[2]),
+    sphereScale(
+      vec3(LIGHT_MARKER_RADIUS, LIGHT_MARKER_RADIUS, LIGHT_MARKER_RADIUS),
+    ),
+    preset.marker,
+  );
+  gl.uniform1f(uUnlitLoc, 0.0);
 }
 
 // Draws the whole cat. Each part's matrix is built from its parent's matrix.
@@ -473,10 +633,10 @@ function drawCat() {
 
 // Matrix that projects any point onto the plane y = h, along the line from the light through it.
 function buildShadowMatrix() {
-  const lx = LIGHT_POSITION[0];
-  const lz = LIGHT_POSITION[2];
+  const lx = lightPosition[0];
+  const lz = lightPosition[2];
   const h = FLOOR_Y + SHADOW_Y_OFFSET;
-  const ly = LIGHT_POSITION[1] - h; // light height measured from the shadow plane
+  const ly = lightPosition[1] - h; // light height measured from the shadow plane
 
   const s = mat4();
   s[0][0] = ly;
@@ -521,6 +681,7 @@ function drawShadow() {
   gl.stencilFunc(gl.EQUAL, 0, 0xff); // only draw where nothing was drawn yet
   gl.stencilOp(gl.KEEP, gl.KEEP, gl.INCR); // then mark the pixel as done
 
+  drawScene();
   drawCat();
 
   gl.disable(gl.STENCIL_TEST);
@@ -622,7 +783,7 @@ function updateCamera() {
 // The shader works in eye space, so the world-space light must be moved
 // into eye space every frame (the camera moves, so the result changes).
 function uploadLight() {
-  const p = [LIGHT_POSITION[0], LIGHT_POSITION[1], LIGHT_POSITION[2], 1.0];
+  const p = [lightPosition[0], lightPosition[1], lightPosition[2], 1.0];
   const eyeLight = [];
   for (let row = 0; row < 3; row++) {
     eyeLight.push(
@@ -647,7 +808,64 @@ function uploadLight() {
   gl.uniform3fv(uFillDirEyeLoc, new Float32Array(eyeFill));
 }
 
+// Moves the light around the y axis when orbiting is on (L key).
+function updateLight(dt) {
+  if (!lightOrbiting) return;
+  lightAngle += LIGHT_ORBIT_SPEED * dt;
+  const a = radians(lightAngle);
+  lightPosition = vec3(
+    LIGHT_ORBIT_RADIUS * Math.cos(a),
+    LIGHT_POSITION[1],
+    LIGHT_ORBIT_RADIUS * Math.sin(a),
+  );
+}
+
+// Sends the light colors and clear (sky) color for the current time of day.
+function applyTimeOfDay() {
+  const preset = isNight ? NIGHT : DAY;
+  gl.clearColor(preset.clear[0], preset.clear[1], preset.clear[2], preset.clear[3]);
+  gl.uniform3fv(uAmbientLoc, flatten(preset.ambient));
+  gl.uniform3fv(uDiffuseLoc, flatten(preset.diffuse));
+  gl.uniform3fv(uFillColorLoc, flatten(preset.fill));
+}
+
+function resetCamera() {
+  cameraAzimuth = CAMERA_START_AZIMUTH;
+  cameraElevation = CAMERA_START_ELEVATION;
+  cameraDistance = CAMERA_START_DISTANCE;
+}
+
+function onKeyDown(e) {
+  if (e.repeat) return; // holding a key down shouldn't toggle it over and over
+  switch (e.key.toLowerCase()) {
+    case "r":
+      resetCamera();
+      break;
+    case "s":
+      shadowEnabled = !shadowEnabled;
+      break;
+    case "g":
+      rimEnabled = !rimEnabled;
+      break;
+    case "t":
+      toonEnabled = !toonEnabled;
+      break;
+    case "l":
+      lightOrbiting = !lightOrbiting;
+      break;
+    case "n":
+      isNight = !isNight;
+      applyTimeOfDay();
+      break;
+    case "c":
+      grassEnabled = !grassEnabled;
+      break;
+  }
+}
+
 function setupInput() {
+  window.addEventListener("keydown", onKeyDown);
+
   canvas.addEventListener("mousedown", function (e) {
     if (e.button !== 0) return; // left button only
     isDragging = true;
@@ -789,21 +1007,25 @@ function render(now) {
 
   updateCat(dt);
   updateAnimation(dt);
+  updateLight(dt);
   updateCamera();
   uploadLight();
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT | gl.STENCIL_BUFFER_BIT);
 
-    // floor: checkerboard on, rim off
-  gl.uniform1f(uPatternLoc, 1.0);
+  // floor: grass texture (pattern 3) or procedural checkerboard (pattern 1), rim off
+  gl.uniform1f(uPatternLoc, grassEnabled ? 3.0 : 1.0);
   gl.uniform1f(uRimStrengthLoc, 0.0);
   drawMesh(floorMesh, mat4(), FLOOR_COLOR, 0.1);
   gl.uniform1f(uPatternLoc, 0.0);
 
-  drawShadow();
+  if (shadowEnabled) drawShadow();
 
-  // cat: rim light and toon shading on
-  gl.uniform1f(uRimStrengthLoc, RIM_STRENGTH);
-  gl.uniform1f(uToonLevelsLoc, TOON_LEVELS);
+  drawScene();
+  drawLightMarker();
+
+  // cat: rim light and toon shading (each can be toggled from the keyboard)
+  gl.uniform1f(uRimStrengthLoc, rimEnabled ? RIM_STRENGTH : 0.0);
+  gl.uniform1f(uToonLevelsLoc, toonEnabled ? TOON_LEVELS : 0.0);
   drawCat();
   gl.uniform1f(uRimStrengthLoc, 0.0);
   gl.uniform1f(uToonLevelsLoc, 0.0);
@@ -868,7 +1090,13 @@ function makeFloor(halfSize, y) {
 
   const indices = [0, 2, 1, 0, 3, 2];
 
-  return { positions, normals, indices };
+  // texture coordinates: the image repeats once every GRASS_TILE_SIZE world units
+  // (values past 0..1 make the GPU wrap around, because the texture uses REPEAT)
+  const texCoords = positions.map(function (p) {
+    return vec2(p[0] / GRASS_TILE_SIZE, p[2] / GRASS_TILE_SIZE);
+  });
+
+  return { positions, normals, texCoords, indices };
 }
 
 // Box centered at the origin. 24 vertices (4 per face) so each face has a flat normal.

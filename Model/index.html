@@ -7,34 +7,39 @@
     <p>Title - A non NDC Cat in Webgl with help of Common File</p>
     <p>Interaction - Click the floor to make the cat walk, click the cat to make it jump, drag to orbit, scroll to zoom</p>
     <p>Animation - Cat's legs swing as it walks, tail sways, jumps when clicked</p>
-    <p>Advanced Tasks - Phong lighting with fill light, rim light, toon shading, procedural eyes, procedural checkerboard floor, planar stencil shadow, hierarchical model</p>
+    <p>Advanced Tasks - Phong lighting with fill light, rim light, toon shading, procedural eyes, grass image texture on the floor (mipmaps, anisotropic filtering, two-scale anti-tiling), procedural checkerboard floor, planar stencil shadow, hierarchical model</p>
+    <p>Keys - R reset camera, C grass texture / checkerboard, S shadow on/off, G rim light on/off, T toon shading on/off, L orbit the light, N day/night</p>
     <canvas id="gl-canvas" width="580" height="580"> </canvas>
     <script id="vertex-shader" type="x-shader/x-vertex">
       #version 300 es
       in vec3 aPosition;
       in vec3 aNormal;
+      in vec2 aTexCoord;                   // only the floor has these; others read (0, 0)
       uniform mat4 uModelView;
       uniform mat4 uProjection;
       uniform mat3 uNormalMatrix;
       out vec3 vPosEye;
       out vec3 vNormalEye;
       out vec3 vObjPos;
+      out vec2 vTexCoord;
 
       void main() {
         vec4 posEye = uModelView * vec4(aPosition, 1.0);
         vPosEye = posEye.xyz;
         vNormalEye = uNormalMatrix * aNormal;
         vObjPos = aPosition;                 // for the floor this equals the world position
+        vTexCoord = aTexCoord;
         gl_Position = uProjection * posEye;
       }
     </script>
 
     <script id="fragment-shader" type="x-shader/x-fragment">
       #version 300 es
-      precision mediump float;
+      precision highp float;
       in vec3 vPosEye;
       in vec3 vNormalEye;
       in vec3 vObjPos;
+      in vec2 vTexCoord;
       uniform vec4 uColor;
       uniform vec4 uColor2;
       uniform float uPattern;
@@ -55,6 +60,9 @@
       uniform float uMeshRadius;   // radius the sphere mesh was built with (object space)
       uniform vec3 uFillDirEye;    // fill light: direction TO the light, in eye space
       uniform vec3 uFillColor;
+      uniform sampler2D uGrass;
+      uniform float uGrassMacroScale; // size of the second, larger copy of the grass
+      uniform float uGrassMacroMix;   // how much of it to blend in
       out vec4 fragColor;
 
       void main() {
@@ -63,9 +71,16 @@
           return;
         }
 
-        // base color: uPattern 0 = plain, 1 = checkerboard floor, 2 = procedural eye
+        // base color: uPattern 0 = plain, 1 = checkerboard floor, 2 = procedural eye,
+        // 3 = grass image texture
         vec3 base = uColor.rgb;
-        if (uPattern > 1.5) {
+        if (uPattern > 2.5) {
+          // the same image sampled at two scales: a repeating tile shows an obvious grid
+          // from far away, and mixing in a much larger copy breaks that pattern up
+          vec3 detail = texture(uGrass, vTexCoord).rgb;
+          vec3 macro = texture(uGrass, vTexCoord * uGrassMacroScale + vec2(0.37, 0.71)).rgb;
+          base = mix(detail, macro, uGrassMacroMix);
+        } else if (uPattern > 1.5) {
           // eye: vObjPos is on the unscaled sphere mesh, and the eye looks down +z
           vec2 p = vObjPos.xy / uMeshRadius;           // -1..1 across the eye
           float front = step(0.0, vObjPos.z);          // only paint the front half
@@ -108,9 +123,12 @@
         if (toon) rim = step(0.4, rim);                                   // solid outline band
         vec3 rimLight = uRimColor * rim * uRimStrength;
 
-        fragColor = vec4(ambient + diffuse + specular + fillLight + rimLight, uColor.a);
+        vec3 color = ambient + diffuse + specular + fillLight + rimLight;
+
+        fragColor = vec4(color, uColor.a);
       }
     </script>
+
   </body>
   <script type="text/javascript" src="../Common/initShaders.js"></script>
   <script type="text/javascript" src="../Common/MV.js"></script>
