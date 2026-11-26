@@ -5,10 +5,10 @@
     <p>Assesment 03 - Interactive Animated Project</p>
     <p>Student Name : Muhammad Finan Noufal, Student ID - 8860750</p>
     <p>Title - A non NDC Cat in Webgl with help of Common File</p>
-    <p>Interaction - Click the floor to make the cat walk, click the cat to make it jump, drag to orbit, scroll to zoom</p>
+    <p>Interaction - Click the floor to make the cat walk (it steers around the crates and trees), click the cat to make it jump, drag to orbit, scroll to zoom</p>
     <p>Animation - Cat's legs swing as it walks, tail sways, jumps when clicked</p>
-    <p>Advanced Tasks - Phong lighting with fill light, rim light, toon shading, procedural eyes, grass image texture on the floor (mipmaps, anisotropic filtering, two-scale anti-tiling), procedural checkerboard floor, planar stencil shadow, hierarchical model</p>
-    <p>Keys - R reset camera, C grass texture / checkerboard, S shadow on/off, G rim light on/off, T toon shading on/off, L orbit the light, N day/night</p>
+    <p>Advanced Tasks - Phong and Blinn-Phong lighting (toggle) with fill light, rim light, toon shading, procedural eyes, grass image texture on the floor (mipmaps, anisotropic filtering, two-scale anti-tiling), fur image texture on the cat, distance fog, procedural checkerboard floor, planar stencil shadow, hierarchical model</p>
+    <p>Keys - R reset camera, C grass texture / checkerboard, F fur on/off, B Blinn-Phong / Phong, M fog on/off, S shadow on/off, G rim light on/off, T toon shading on/off, L orbit the light, N day/night</p>
     <canvas id="gl-canvas" width="580" height="580"> </canvas>
     <script id="vertex-shader" type="x-shader/x-vertex">
       #version 300 es
@@ -63,6 +63,16 @@
       uniform sampler2D uGrass;
       uniform float uGrassMacroScale; // size of the second, larger copy of the grass
       uniform float uGrassMacroMix;   // how much of it to blend in
+      uniform sampler2D uFur;
+      uniform vec2 uFurTile;       // how many times the fur repeats across a part
+      uniform float uFurStrength;  // 0 = plain color, 1 = full fur detail
+      uniform float uFurContrast;  // > 1 exaggerates the fur's light/dark strands
+      uniform float uBlinn;        // 1 = Blinn-Phong highlight, 0 = classic Phong
+      uniform mat4 uInvView;       // eye space -> world space (for the fog distance)
+      uniform vec3 uFogColor;      // the sky color, so the far floor melts into it
+      uniform float uFogStart;     // distance from the center where the fog begins
+      uniform float uFogEnd;       // ... and where only fog is left
+      uniform float uFogStrength;  // 0 = fog off, 1 = on
       out vec4 fragColor;
 
       void main() {
@@ -72,9 +82,21 @@
         }
 
         // base color: uPattern 0 = plain, 1 = checkerboard floor, 2 = procedural eye,
-        // 3 = grass image texture
+        // 3 = grass image texture, 4 = fur image texture
         vec3 base = uColor.rgb;
-        if (uPattern > 2.5) {
+        if (uPattern > 3.5) {
+          // fur: only the image's light/dark pattern is used, so the cat keeps its own
+          // color whatever color the photo is. The smallest mipmap level is a single pixel
+          // holding the image's average color, so dividing by it gives "brighter or darker
+          // than average" (about 1.0 on average).
+          vec3 fur = texture(uFur, vTexCoord * uFurTile).rgb;
+          vec3 average = textureLod(uFur, vec2(0.5), 20.0).rgb;
+          const vec3 LUMA = vec3(0.299, 0.587, 0.114);       // how bright each channel looks
+          float detail = dot(fur, LUMA) / max(dot(average, LUMA), 0.01);
+          // fur photos are often low contrast, so stretch the difference from average
+          detail = 1.0 + (detail - 1.0) * uFurContrast;
+          base = uColor.rgb * mix(1.0, clamp(detail, 0.0, 2.5), uFurStrength);
+        } else if (uPattern > 2.5) {
           // the same image sampled at two scales: a repeating tile shows an obvious grid
           // from far away, and mixing in a much larger copy breaks that pattern up
           vec3 detail = texture(uGrass, vTexCoord).rgb;
@@ -110,7 +132,18 @@
         if (toon) diff = floor(diff * uToonLevels + 0.5) / uToonLevels; // snap to bands
         vec3 diffuse = uDiffuse * base * diff;
 
-        float spec = (diff > 0.0) ? pow(max(dot(R, V), 0.0), uShininess) : 0.0;
+        float spec = 0.0;
+        if (diff > 0.0) {
+          if (uBlinn > 0.5) {
+            // Blinn-Phong: compare N with the halfway vector between the light and the eye.
+            // dot(N, H) falls off more slowly than dot(R, V), so the exponent is raised
+            // about 4x to keep a similar highlight size.
+            vec3 H = normalize(L + V);
+            spec = pow(max(dot(N, H), 0.0), uShininess * 4.0);
+          } else {
+            spec = pow(max(dot(R, V), 0.0), uShininess);     // classic Phong
+          }
+        }
         if (toon) spec = step(0.5, spec);                                 // hard-edged highlight
         vec3 specular = uSpecular * uSpecStrength * spec;
 
@@ -124,6 +157,11 @@
         vec3 rimLight = uRimColor * rim * uRimStrength;
 
         vec3 color = ambient + diffuse + specular + fillLight + rimLight;
+
+        // fog: fade toward the sky color with distance from the center of the scene
+        vec3 worldPos = (uInvView * vec4(vPosEye, 1.0)).xyz;
+        float fog = smoothstep(uFogStart, uFogEnd, length(worldPos.xz)) * uFogStrength;
+        color = mix(color, uFogColor, fog);
 
         fragColor = vec4(color, uColor.a);
       }
