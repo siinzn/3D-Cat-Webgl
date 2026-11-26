@@ -1,29 +1,123 @@
-// Constants
-const CLEAR_COLOR = vec4(0.68, 0.77, 0.86, 1.0); // hazy daytime sky (also the fog color)
-const SPHERE_LAT_SEGMENTS = 24;
-const SPHERE_LONG_SEGMENTS = 24;
-const FLOOR_HALF_SIZE = 300;
-const FLOOR_Y = 0;
-const FLOOR_COLOR = vec4(0.25, 0.27, 0.32, 1.0);
+// CONSTANTS
+// All sizes are in world units (the cat is about 140 units tall); nothing is written in NDC coordinates.
+
+// Frame Rate
+const MAX_FRAME_TIME = 0.1; // seconds; stops a huge jump after switching browser tabs
+
+// CAMERA
 const CAMERA_FOV = 45;
 const CAMERA_NEAR = 1;
 const CAMERA_FAR = 3000;
+const CAMERA_TARGET = vec3(0, 80, 0); // the point the camera looks at and orbits around
+const CAMERA_START_AZIMUTH = 30; // degrees around (R key resets to these)
+const CAMERA_START_ELEVATION = 25; // degrees above the floor
 const CAMERA_START_DISTANCE = 450;
 const CAMERA_MIN_DISTANCE = 150;
 const CAMERA_MAX_DISTANCE = 1200;
-const CAMERA_MIN_ELEVATION = 5; //stops the camera going under the floor
-const CAMERA_MAX_ELEVATION = 85; //stops it flipping over the top
+const CAMERA_MIN_ELEVATION = 5; // stops the camera going under the floor
+const CAMERA_MAX_ELEVATION = 85; // stops it flipping over the top
 const CAMERA_ORBIT_SENSITIVITY = 0.4; // degrees per pixel dragged
 const CAMERA_ZOOM_SENSITIVITY = 0.5; // distance per wheel unit
-const CAMERA_TARGET = vec3(0, 80, 0);
-const LIGHT_POSITION = vec3(150, 450, 150);
+
+// Mouse CLick
+const CLICK_DRAG_THRESHOLD_PX = 5; // moved less than this = click, more = drag
+
+// Segment Sizes
+const SPHERE_LAT_SEGMENTS = 24;
+const SPHERE_LONG_SEGMENTS = 24;
+const CYLINDER_SEGMENTS = 20;
+const SPHERE_MESH_RADIUS = 50;
+const CYLINDER_MESH_RADIUS = 20;
+const CYLINDER_MESH_HEIGHT = 80;
+const CONE_MESH_RADIUS = 25;
+const CONE_MESH_HEIGHT = 60;
+const BOX_MESH_SIZE = 50;
+
+// FLOOR Constants
+const FLOOR_Y = 0;
+const FLOOR_HALF_SIZE = 300; // walkable area: -300..300 on x and z
+const FLOOR_EDGE_MARGIN = 20; // the cat can't be sent closer than this to the floor's edge
+const FLOOR_DRAW_HALF_SIZE = 1000; // drawn bigger than the walkable area; fog hides its edge
+const FLOOR_COLOR = vec4(0.25, 0.27, 0.32, 1.0); // checkerboard color 1
+const FLOOR_COLOR_B = vec4(0.17, 0.19, 0.24, 1.0); // checkerboard color 2
+const FLOOR_CHECK_SIZE = 50; // checkerboard tile size
+const TARGET_MARKER_COLOR = vec4(1.0, 0.8, 0.2, 1.0); // yellow disc where you clicked
+const TARGET_MARKER_RADIUS = 10;
+
+// FOG
+const FOG_START = 320; // just outside the walkable area, so the cat never fades
+const FOG_END = 900;
+
+// LIGHTING
+const LIGHT_POSITION = vec3(150, 450, 150); // starting position of the main (point) light
 const LIGHT_AMBIENT = vec3(0.3, 0.3, 0.3);
 const LIGHT_DIFFUSE = vec3(1.0, 1.0, 1.0);
 const LIGHT_SPECULAR = vec3(1.0, 1.0, 1.0);
 const MATERIAL_SHININESS = 60.0;
-const CYLINDER_SEGMENTS = 20;
-const TEST_COLOR = vec4(0.9, 1, 0.2, 1.0);
-// CAT
+const FILL_LIGHT_DIRECTION = vec3(-0.6, 0.4, -0.7); // world space, points toward the fill light
+const FILL_LIGHT_COLOR = vec3(0.18, 0.2, 0.28); // weak and slightly blue
+const RIM_POWER = 3.0; // higher = thinner rim
+const RIM_STRENGTH = 0.9;
+const RIM_COLOR = vec3(0.45, 0.55, 0.9);
+const TOON_LEVELS = 4; // diffuse bands on the cat; 0 turns toon shading off
+
+// moving light (L key): orbits the y axis at the starting light's height and distance
+const LIGHT_ORBIT_SPEED = 25; // degrees per second
+const LIGHT_ORBIT_RADIUS = Math.hypot(LIGHT_POSITION[0], LIGHT_POSITION[2]);
+const LIGHT_START_ANGLE =
+  (Math.atan2(LIGHT_POSITION[2], LIGHT_POSITION[0]) * 180) / Math.PI;
+const LIGHT_MARKER_RADIUS = 12; // the small glowing ball drawn where the light is
+
+// day / night presets (N key switches between them)
+const CLEAR_COLOR = vec4(0.68, 0.77, 0.86, 1.0); // hazy daytime sky (also the fog color)
+const DAY = {
+  clear: CLEAR_COLOR,
+  ambient: LIGHT_AMBIENT,
+  diffuse: LIGHT_DIFFUSE,
+  fill: FILL_LIGHT_COLOR,
+  marker: vec4(1.0, 0.92, 0.6, 1.0), // sun
+};
+const NIGHT = {
+  clear: vec4(0.02, 0.03, 0.07, 1.0),
+  ambient: vec3(0.08, 0.09, 0.14),
+  diffuse: vec3(0.45, 0.52, 0.75),
+  fill: vec3(0.05, 0.06, 0.12),
+  marker: vec4(0.8, 0.85, 1.0, 1.0), // moon
+};
+
+// SHADOW constants
+const SHADOW_COLOR = vec3(0, 0, 0);
+const SHADOW_ALPHA = 0.9;
+const SHADOW_Y_OFFSET = 0.6; // lifts the shadow off the floor to avoid flicker
+
+// TEXTURES
+const MAX_ANISOTROPY = 8;
+// Bigger images are shrunk before upload: some GPUs reject huge textures (the
+// original 8192px fur failed silently), and 2048 is plenty for this canvas
+const MAX_TEXTURE_DIMENSION = 2048;
+
+const GRASS_TEXTURE_UNIT = 0; // texture slot the grass image lives in
+const GRASS_IMAGE_URL = "./textures/grass.jpg";
+const GRASS_FALLBACK_COLOR = vec4(0.32, 0.45, 0.22, 1.0); // plain green until the image loads
+const GRASS_TILE_SIZE = 80; // world units covered by one copy of the image
+const GRASS_MACRO_SCALE = 0.13; // a second, much larger copy hides the repeating pattern
+const GRASS_MACRO_MIX = 0.35; // how much of that large copy is blended in
+
+const FUR_TEXTURE_UNIT = 1;
+const FUR_IMAGE_URL = "./textures/fur.jpg";
+const FUR_FALLBACK_COLOR = vec4(0.5, 0.5, 0.5, 1.0); // flat grey = no visible effect
+const FUR_TILE = vec2(2, 1); // repeats around / down each part (2:1 keeps strands square on a sphere)
+const FUR_STRENGTH = 1.0; // 0 = plain cat color, 1 = full fur light/dark detail
+const FUR_CONTRAST = 4.0; // the fur photo only varies by about 11%, so exaggerate it 4x
+
+// what the fragment shader paints on a surface (the uPattern uniform)
+const PATTERN_PLAIN = 0;
+const PATTERN_CHECKER = 1;
+const PATTERN_EYE = 2;
+const PATTERN_GRASS = 3;
+const PATTERN_FUR = 4;
+
+// CAT: shape (sizes and offsets of each body part)
 const CAT_BODY_RADII = vec3(18, 26, 15);
 const CAT_HEAD_RADII = vec3(38, 31, 30);
 const CAT_LEG_LENGTH = 24;
@@ -48,53 +142,27 @@ const CAT_TAIL_SEGMENT_LENGTH = 14;
 const CAT_TAIL_RADIUS = 4.5;
 const CAT_TAIL_START_ANGLE = -80; // degrees: points backward
 const CAT_TAIL_BEND = 24; // degrees added per segment, curls it upward
-const CAT_SPEC_STRENGTH = 0.8;
 
-// COLORS
+// CAT: colors and material
 const CAT_COLOR = vec4(0.16, 0.16, 0.18, 1.0); // dark grey, not pure black
+const CAT_SPEC_STRENGTH = 0.8;
 const EYE_COLOR = vec4(0.92, 0.92, 0.92, 1.0);
 const PUPIL_COLOR = vec4(0.02, 0.02, 0.02, 1.0);
-const CLICK_DRAG_THRESHOLD_PX = 5; // moved less than this = click, more = drag
-// WORLD (add below FLOOR_Y)
-const FLOOR_EDGE_MARGIN = 20; // the cat can't be sent closer than this to the floor's edge
-const TARGET_MARKER_COLOR = vec4(1.0, 0.8, 0.2, 1.0);
-const TARGET_MARKER_RADIUS = 10;
 
-// CAT (add to this group)
+// CAT: movement
 const CAT_WALK_SPEED = 120; // world units per second
+const CAT_TURN_SPEED = 360; // degrees per second
 const CAT_WALK_THRESHOLD = 2; // closer than this to the target = arrived
 
-// GL (add to this group)
-const MAX_FRAME_TIME = 0.1; // seconds; stops a huge jump after switching browser tabs
-const CAT_TURN_SPEED = 360; // degrees per second
-
+// CAT: animation
 const CAT_LEG_MAX_ANGLE = 35; // degrees
 const CAT_SWING_SPEED = 13; // radians per second of walk cycle
 const CAT_BLEND_SPEED = 8; // how fast legs ease in/out (per second)
 const CAT_BOB_HEIGHT = 3; // world units
 const CAT_TAIL_SWAY_ANGLE = 14; // degrees, left/right
 const CAT_TAIL_SWAY_SPEED = 2.5; // radians per second
-// SHADOW
-const SHADOW_COLOR = vec3(0, 0, 0);
-const SHADOW_ALPHA = 0.9;
-const SHADOW_Y_OFFSET = 0.6; // lifts the shadow off the floor to avoid flicker
 
-// COLORS (add below FLOOR_COLOR)
-const FLOOR_COLOR_B = vec4(0.17, 0.19, 0.24, 1.0);   // the second checker color; FLOOR_COLOR is the first
-
-// WORLD (add below FLOOR_EDGE_MARGIN)
-const FLOOR_CHECK_SIZE = 50;                          // tile size; 600 / 50 = 12 tiles each way
-
-// LIGHT (add to this group)
-const RIM_POWER = 3.0;                                // higher = thinner rim
-const RIM_STRENGTH = 0.9;
-const RIM_COLOR = vec3(0.45, 0.55, 0.9);
-const TOON_LEVELS = 4; // diffuse bands on the cat; 0 turns toon shading off
-const FILL_LIGHT_DIRECTION = vec3(-0.6, 0.4, -0.7); // world space, points toward the fill light
-const FILL_LIGHT_COLOR = vec3(0.18, 0.2, 0.28); // weak and slightly blue
-const SPHERE_MESH_RADIUS = 50; // radius sphereMesh is built with (makeSphere(50, ...))
-
-// CAT (click reaction)
+// CAT: click reaction (jump)
 const CAT_PICK_RADIUS = 60; // bounding sphere used to detect clicks on the cat
 const CAT_PICK_CENTER_Y = 80; // height of that sphere's center above the cat's feet
 const CAT_JUMP_HEIGHT = 40; // world units
@@ -102,14 +170,14 @@ const CAT_JUMP_DURATION = 0.6; // seconds
 const CAT_WIGGLE_ANGLE = 30; // extra tail swing (degrees) while jumping
 const CAT_WIGGLE_SPEED = 25; // radians per second
 
-// SCENE
-// Fixed layout, placed so nothing overlaps and the middle stays clear for the cat.
+// SCENE (fixed layout: nothing overlaps and the middle stays clear for the cat)
 const CRATES = [
   { x: -150, z: 80, size: 40, turn: 15 },
   { x: -120, z: 115, size: 28, turn: -25 },
   { x: 230, z: 60, size: 36, turn: 40 },
 ];
 const CRATE_COLOR = vec4(0.6, 0.44, 0.24, 1.0);
+
 const TREES = [
   { x: -190, z: -160, scale: 1.0 },
   { x: 180, z: -170, scale: 1.2 },
@@ -124,7 +192,7 @@ const TREE_LEAF_SHRINK = 0.75; // each layer is this much smaller than the one b
 const TRUNK_COLOR = vec4(0.36, 0.24, 0.14, 1.0);
 const LEAF_COLOR = vec4(0.18, 0.42, 0.22, 1.0);
 
-// COLLISION: every obstacle is a circle on the floor (x, z, radius)
+// COLLISION (every obstacle is a circle on the floor: x, z, radius)
 const CAT_COLLISION_RADIUS = 22; // the cat's own "personal space" circle
 const CRATE_COLLISION_FACTOR = 0.71; // half a square's diagonal, so the corners are covered
 const TREE_COLLISION_RADIUS = 32; // per unit of tree scale (roughly the lowest leaves)
@@ -139,126 +207,80 @@ const OBSTACLES = CRATES.map(function (c) {
   }),
 );
 
-// moving light: orbits the y axis at the starting light's height and distance
-const LIGHT_ORBIT_SPEED = 25; // degrees per second
-const LIGHT_ORBIT_RADIUS = Math.hypot(LIGHT_POSITION[0], LIGHT_POSITION[2]);
-const LIGHT_START_ANGLE =
-  (Math.atan2(LIGHT_POSITION[2], LIGHT_POSITION[0]) * 180) / Math.PI;
-const LIGHT_MARKER_RADIUS = 12; // the small glowing ball drawn where the light is
+// STATES
 
-// day / night presets (N key switches between them)
-const DAY = {
-  clear: CLEAR_COLOR,
-  ambient: LIGHT_AMBIENT,
-  diffuse: LIGHT_DIFFUSE,
-  fill: FILL_LIGHT_COLOR,
-  marker: vec4(1.0, 0.92, 0.6, 1.0), // sun
-};
-const NIGHT = {
-  clear: vec4(0.02, 0.03, 0.07, 1.0),
-  ambient: vec3(0.08, 0.09, 0.14),
-  diffuse: vec3(0.45, 0.52, 0.75),
-  fill: vec3(0.05, 0.06, 0.12),
-  marker: vec4(0.8, 0.85, 1.0, 1.0), // moon
-};
-
-// TEXTURES
-const GRASS_TEXTURE_UNIT = 0; // texture slot the grass image lives in
-const GRASS_IMAGE_URL = "./textures/grass.jpg";
-const GRASS_FALLBACK_COLOR = vec4(0.32, 0.45, 0.22, 1.0); // plain green until the image loads
-const GRASS_TILE_SIZE = 80; // world units covered by one copy of the image
-const GRASS_MACRO_SCALE = 0.13; // a second, much larger copy hides the repeating pattern
-const GRASS_MACRO_MIX = 0.35; // how much of that large copy is blended in
-const MAX_ANISOTROPY = 8;
-const FUR_TEXTURE_UNIT = 1;
-const FUR_IMAGE_URL = "./textures/fur.jpg";
-const FUR_FALLBACK_COLOR = vec4(0.5, 0.5, 0.5, 1.0); // flat grey = no visible effect
-const FUR_TILE = vec2(2, 1); // repeats around / down each part (2:1 keeps strands square on a sphere)
-const FUR_STRENGTH = 1.0; // 0 = plain cat color, 1 = full fur light/dark detail
-const FUR_CONTRAST = 4.0; // the fur photo only varies by about 11%, so exaggerate it 4x
-// Bigger images are shrunk before upload: some GPUs reject huge textures (the
-// original 8192px fur failed silently), and 2048 is plenty for this canvas
-const MAX_TEXTURE_DIMENSION = 2048;
-
-// what the fragment shader paints on a surface (the uPattern uniform)
-const PATTERN_PLAIN = 0;
-const PATTERN_CHECKER = 1;
-const PATTERN_EYE = 2;
-const PATTERN_GRASS = 3;
-const PATTERN_FUR = 4;
-
-// FOG: the floor is drawn bigger than the walkable area and fades into the sky
-// color between FOG_START and FOG_END (distance from the center), hiding its edge
-const FLOOR_DRAW_HALF_SIZE = 1000;
-const FOG_START = 320; // just outside the walkable area, so the cat never fades
-const FOG_END = 900;
-
-// CAMERA (reset with the R key)
-const CAMERA_START_AZIMUTH = 30;
-const CAMERA_START_ELEVATION = 25;
-
-// Variables
+// ---- WebGL objects ----
 let canvas;
 let gl;
 let program;
-let aPositionLoc, uModelViewLoc, uProjectionLoc, uColorLoc;
-let sphereMesh, floorMesh;
+let sphereMesh, floorMesh, boxMesh, cylinderMesh, coneMesh;
+
+// attribute and uniform locations (their "addresses" in the shader program)
+let aPositionLoc, aNormalLoc, aTexCoordLoc;
+let uModelViewLoc, uProjectionLoc, uNormalMatrixLoc;
+let uColorLoc, uColor2Loc, uPatternLoc, uCheckSizeLoc, uUnlitLoc;
+let uLightPosEyeLoc,
+  uAmbientLoc,
+  uDiffuseLoc,
+  uSpecularLoc,
+  uShininessLoc,
+  uSpecStrengthLoc;
+let uFillDirEyeLoc, uFillColorLoc;
+let uRimStrengthLoc, uRimPowerLoc, uRimColorLoc, uToonLevelsLoc;
+let uBlinnLoc, uFogStrengthLoc, uFogColorLoc, uInvViewLoc;
+
+//  camera and matrices
 let viewMatrix, projectionMatrix;
 let cameraAzimuth = CAMERA_START_AZIMUTH; // degrees around the cat
 let cameraElevation = CAMERA_START_ELEVATION; // degrees above the floor
 let cameraDistance = CAMERA_START_DISTANCE;
+
+//  mouse
 let isDragging = false;
-let lastMouseX = 0;
+let lastMouseX = 0; // last position while dragging (for the orbit delta)
 let lastMouseY = 0;
-let aNormalLoc, uNormalMatrixLoc, uLightPosEyeLoc;
-let uAmbientLoc, uDiffuseLoc, uSpecularLoc, uShininessLoc, uSpecStrengthLoc;
-let boxMesh, cylinderMesh, coneMesh, ellipsoidMesh;
-// cat
+let mouseDownX = 0; // where the press started (to tell a click from a drag)
+let mouseDownY = 0;
+
+//  timing
+let lastFrameTime = 0;
+let animTime = 0; // total running time in seconds
+
+//  cat
 let catPosition = vec3(0, FLOOR_Y, 0);
 let catHeading = 0; // degrees, 0 = facing +z
-let legAngleLeft = 0;
-let legAngleRight = 0;
-let mouseDownX = 0;
-let mouseDownY = 0;
 let catTarget = null; // vec3 on the floor, or null if there's no target yet
 let catIsWalking = false;
-let lastFrameTime = 0;
+let catAvoidSide = 0; // going round an obstacle: +1 or -1, or 0 when nothing is in the way
 let walkPhase = 0;
 let legBlend = 0; // 0 = standing, 1 = full walk
-let animTime = 0; // total running time in seconds
+let legAngleLeft = 0;
+let legAngleRight = 0;
 let catBob = 0;
 let tailSway = 0; // degrees
-let uUnlitLoc;
-let shadowPass = false;
-let shadowMatrix;
-
-let uColor2Loc, uPatternLoc, uCheckSizeLoc;
-let uRimStrengthLoc, uRimPowerLoc, uRimColorLoc;
-let uToonLevelsLoc, uFillDirEyeLoc;
 let catJumpTime = -1; // seconds into the current jump, -1 = not jumping
 let catJumpHeight = 0;
 
-// scene / keyboard toggles
-let uFillColorLoc;
-let lightPosition = vec3(LIGHT_POSITION[0], LIGHT_POSITION[1], LIGHT_POSITION[2]);
+//  light and shadow
+let lightPosition = vec3(
+  LIGHT_POSITION[0],
+  LIGHT_POSITION[1],
+  LIGHT_POSITION[2],
+);
 let lightAngle = LIGHT_START_ANGLE; // degrees around the y axis
+let shadowPass = false; // true while drawing the flattened shadow copy
+let shadowMatrix;
+
+//  keyboard toggles
 let lightOrbiting = false; // L key
 let isNight = false; // N key
 let shadowEnabled = true; // S key
 let rimEnabled = true; // G key
 let toonEnabled = true; // T key
-
-// textures
-let aTexCoordLoc;
 let grassEnabled = true; // C key: grass image texture vs procedural checkerboard
 let furEnabled = true; // F key: fur texture on the cat
 let blinnEnabled = true; // B key: Blinn-Phong (true) or classic Phong (false) highlights
 let fogEnabled = true; // M key (mist)
-let uBlinnLoc, uFogStrengthLoc, uFogColorLoc, uInvViewLoc;
-
-// collision avoidance: which way the cat is going round an obstacle
-// (+1 or -1), or 0 when nothing is in the way
-let catAvoidSide = 0;
 
 window.onload = function init() {
   canvas = document.getElementById("gl-canvas");
@@ -281,7 +303,7 @@ window.onload = function init() {
   uColorLoc = gl.getUniformLocation(program, "uColor");
   uUnlitLoc = gl.getUniformLocation(program, "uUnlit");
 
-    uColor2Loc = gl.getUniformLocation(program, "uColor2");
+  uColor2Loc = gl.getUniformLocation(program, "uColor2");
   uPatternLoc = gl.getUniformLocation(program, "uPattern");
   uCheckSizeLoc = gl.getUniformLocation(program, "uCheckSize");
   uRimStrengthLoc = gl.getUniformLocation(program, "uRimStrength");
@@ -343,35 +365,62 @@ window.onload = function init() {
   );
   gl.uniformMatrix4fv(uProjectionLoc, false, flatten(projectionMatrix));
 
-  // meshes
+  // meshes: built once, big (in world units, not NDC), then reused for every part.
+  // The second argument records the size each one was built at, for drawPart.
   sphereMesh = createMesh(
-    makeSphere(50, SPHERE_LAT_SEGMENTS, SPHERE_LONG_SEGMENTS),
+    makeSphere(SPHERE_MESH_RADIUS, SPHERE_LAT_SEGMENTS, SPHERE_LONG_SEGMENTS),
+    equalSize(SPHERE_MESH_RADIUS),
   );
-  floorMesh = createMesh(makeFloor(FLOOR_DRAW_HALF_SIZE, FLOOR_Y));
-
-  // more primitives (cat parts, scene objects)
-  boxMesh = createMesh(makeBox(50, 50, 50)); // cube, used for crates
-  cylinderMesh = createMesh(makeCylinder(20, 20, 80, CYLINDER_SEGMENTS));
-  coneMesh = createMesh(makeCylinder(25, 0, 60, CYLINDER_SEGMENTS));
-  ellipsoidMesh = createMesh(
-    makeEllipsoid(40, 60, 30, SPHERE_LAT_SEGMENTS, SPHERE_LONG_SEGMENTS),
+  cylinderMesh = createMesh(
+    makeCylinder(
+      CYLINDER_MESH_RADIUS,
+      CYLINDER_MESH_RADIUS,
+      CYLINDER_MESH_HEIGHT,
+      CYLINDER_SEGMENTS,
+    ),
+    cylinderSize(CYLINDER_MESH_RADIUS, CYLINDER_MESH_HEIGHT),
   );
+  coneMesh = createMesh(
+    makeCylinder(CONE_MESH_RADIUS, 0, CONE_MESH_HEIGHT, CYLINDER_SEGMENTS),
+    cylinderSize(CONE_MESH_RADIUS, CONE_MESH_HEIGHT),
+  );
+  boxMesh = createMesh(
+    makeBox(BOX_MESH_SIZE, BOX_MESH_SIZE, BOX_MESH_SIZE),
+    equalSize(BOX_MESH_SIZE),
+  );
+  floorMesh = createMesh(makeFloor(FLOOR_DRAW_HALF_SIZE, FLOOR_Y), null); // drawn as-is, never scaled
 
   // grass on the floor: repeats across the ground
   aTexCoordLoc = gl.getAttribLocation(program, "aTexCoord");
   gl.uniform1i(gl.getUniformLocation(program, "uGrass"), GRASS_TEXTURE_UNIT);
-  gl.uniform1f(gl.getUniformLocation(program, "uGrassMacroScale"), GRASS_MACRO_SCALE);
-  gl.uniform1f(gl.getUniformLocation(program, "uGrassMacroMix"), GRASS_MACRO_MIX);
-  loadTexture(GRASS_IMAGE_URL, GRASS_TEXTURE_UNIT, GRASS_FALLBACK_COLOR,
-    gl.REPEAT, gl.REPEAT);
+  gl.uniform1f(
+    gl.getUniformLocation(program, "uGrassMacroScale"),
+    GRASS_MACRO_SCALE,
+  );
+  gl.uniform1f(
+    gl.getUniformLocation(program, "uGrassMacroMix"),
+    GRASS_MACRO_MIX,
+  );
+  loadTexture(
+    GRASS_IMAGE_URL,
+    GRASS_TEXTURE_UNIT,
+    GRASS_FALLBACK_COLOR,
+    gl.REPEAT,
+    gl.REPEAT,
+  );
 
   // fur on the cat: a second image on its own texture unit
   gl.uniform1i(gl.getUniformLocation(program, "uFur"), FUR_TEXTURE_UNIT);
   gl.uniform2fv(gl.getUniformLocation(program, "uFurTile"), flatten(FUR_TILE));
   gl.uniform1f(gl.getUniformLocation(program, "uFurStrength"), FUR_STRENGTH);
   gl.uniform1f(gl.getUniformLocation(program, "uFurContrast"), FUR_CONTRAST);
-  loadTexture(FUR_IMAGE_URL, FUR_TEXTURE_UNIT, FUR_FALLBACK_COLOR,
-    gl.REPEAT, gl.REPEAT);
+  loadTexture(
+    FUR_IMAGE_URL,
+    FUR_TEXTURE_UNIT,
+    FUR_FALLBACK_COLOR,
+    gl.REPEAT,
+    gl.REPEAT,
+  );
 
   setupInput();
   requestAnimationFrame(render);
@@ -380,7 +429,10 @@ window.onload = function init() {
 // Returns the image itself if it's small enough for the GPU, otherwise a scaled-down
 // copy drawn onto a canvas (WebGL accepts a canvas anywhere it accepts an image).
 function shrinkImage(image) {
-  const limit = Math.min(MAX_TEXTURE_DIMENSION, gl.getParameter(gl.MAX_TEXTURE_SIZE));
+  const limit = Math.min(
+    MAX_TEXTURE_DIMENSION,
+    gl.getParameter(gl.MAX_TEXTURE_SIZE),
+  );
   const factor = Math.min(1, limit / Math.max(image.width, image.height));
   if (factor === 1) return image;
 
@@ -400,8 +452,17 @@ function loadTexture(url, unit, fallbackColor, wrapS, wrapT) {
   gl.activeTexture(gl.TEXTURE0 + unit);
   gl.bindTexture(gl.TEXTURE_2D, texture);
   const c = fallbackColor;
-  gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, 1, 1, 0, gl.RGBA, gl.UNSIGNED_BYTE,
-    new Uint8Array([c[0] * 255, c[1] * 255, c[2] * 255, 255]));
+  gl.texImage2D(
+    gl.TEXTURE_2D,
+    0,
+    gl.RGBA,
+    1,
+    1,
+    0,
+    gl.RGBA,
+    gl.UNSIGNED_BYTE,
+    new Uint8Array([c[0] * 255, c[1] * 255, c[2] * 255, 255]),
+  );
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.LINEAR);
 
@@ -410,9 +471,20 @@ function loadTexture(url, unit, fallbackColor, wrapS, wrapT) {
     try {
       gl.activeTexture(gl.TEXTURE0 + unit);
       gl.bindTexture(gl.TEXTURE_2D, texture);
-      gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, shrinkImage(image));
+      gl.texImage2D(
+        gl.TEXTURE_2D,
+        0,
+        gl.RGBA,
+        gl.RGBA,
+        gl.UNSIGNED_BYTE,
+        shrinkImage(image),
+      );
       gl.generateMipmap(gl.TEXTURE_2D); // smaller copies for when it's seen from far away
-      gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.LINEAR_MIPMAP_LINEAR);
+      gl.texParameteri(
+        gl.TEXTURE_2D,
+        gl.TEXTURE_MIN_FILTER,
+        gl.LINEAR_MIPMAP_LINEAR,
+      );
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, wrapS);
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, wrapT);
 
@@ -420,12 +492,18 @@ function loadTexture(url, unit, fallbackColor, wrapS, wrapT) {
       const aniso = gl.getExtension("EXT_texture_filter_anisotropic");
       if (aniso) {
         const max = gl.getParameter(aniso.MAX_TEXTURE_MAX_ANISOTROPY_EXT);
-        gl.texParameterf(gl.TEXTURE_2D, aniso.TEXTURE_MAX_ANISOTROPY_EXT,
-          Math.min(MAX_ANISOTROPY, max));
+        gl.texParameterf(
+          gl.TEXTURE_2D,
+          aniso.TEXTURE_MAX_ANISOTROPY_EXT,
+          Math.min(MAX_ANISOTROPY, max),
+        );
       }
     } catch (err) {
       // opening index.html straight from disk (file://) blocks images in WebGL
-      console.warn("Texture " + url + " blocked; run the page from a local server.", err);
+      console.warn(
+        "Texture " + url + " blocked; run the page from a local server.",
+        err,
+      );
     }
   };
   image.onerror = function () {
@@ -435,8 +513,9 @@ function loadTexture(url, unit, fallbackColor, wrapS, wrapT) {
   return texture;
 }
 
-// Uploads positions and indices to the GPU. Returns handles to draw later.
-function createMesh(data) {
+// Uploads positions, normals, texture coordinates and indices to the GPU.
+// Returns the buffer handles, plus baseSize (the size the mesh was built at).
+function createMesh(data, baseSize) {
   const positionBuffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, positionBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, flatten(data.positions), gl.STATIC_DRAW);
@@ -467,6 +546,7 @@ function createMesh(data) {
     texCoordBuffer,
     indexBuffer,
     count: data.indices.length,
+    baseSize,
   };
 }
 
@@ -508,34 +588,33 @@ function drawMesh(mesh, modelMatrix, color, specStrength = 0.6) {
   gl.drawElements(gl.TRIANGLES, mesh.count, gl.UNSIGNED_SHORT, 0);
 }
 
-// Draws one body part. `matrix` is the part's position/rotation in the world and is
-// what children inherit. `size` stretches only this part's drawing and is NOT passed on.
+// Draws one part. `matrix` is the part's position/rotation in the world and is what
+// children inherit. `size` is the part's real size in world units (radii for a sphere,
+// radius/height/radius for a cylinder or cone, width/height/depth for a box). It only
+// stretches this part's drawing and is NOT passed on to children.
 function drawPart(mesh, matrix, size, color, specStrength = 0.6) {
-  const drawMatrix = mult(matrix, scale(size[0], size[1], size[2]));
+  // the shared meshes were built at mesh.baseSize, so scale by (wanted / built)
+  const s = mesh.baseSize;
+  const drawMatrix = mult(
+    matrix,
+    scale(size[0] / s[0], size[1] / s[1], size[2] / s[2]),
+  );
   drawMesh(mesh, drawMatrix, color, specStrength);
 }
 
-// The base meshes were built big (so their vertices are outside NDC range).
-// These turn the real sizes above into scale factors. They must match how
-// the meshes are created in init:
-//   sphereMesh   = makeSphere(50, ...)
-//   cylinderMesh = makeCylinder(20, 20, 80, ...)
-//   coneMesh     = makeCylinder(25, 0, 60, ...)
-function sphereScale(radii) {
-  return vec3(radii[0] / 50, radii[1] / 50, radii[2] / 50);
+// Every cat part has the same color and shininess.
+function drawCatPart(mesh, matrix, size) {
+  drawPart(mesh, matrix, size, CAT_COLOR, CAT_SPEC_STRENGTH);
 }
 
-function cylinderScale(radius, height) {
-  return vec3(radius / 20, height / 80, radius / 20);
+// Size helpers for drawPart.
+// The same size on every axis: a ball's radius, or a cube's edge length.
+function equalSize(n) {
+  return vec3(n, n, n);
 }
 
-function coneScale(size) {
-  return vec3(size[0] / 25, size[1] / 60, size[2] / 25);
-}
-
-//   boxMesh      = makeBox(50, 50, 50)
-function boxScale(size) {
-  return vec3(size[0] / 50, size[1] / 50, size[2] / 50);
+function cylinderSize(radius, height) {
+  return vec3(radius, height, radius);
 }
 
 // Scene props (trees and crates). Everything sits on the floor (y = FLOOR_Y).
@@ -547,10 +626,11 @@ function drawScene() {
     );
 
     // trunk: the cylinder is centered, so lift it by half its height
+    const trunk = mult(base, translate(0, TREE_TRUNK_HEIGHT / 2, 0));
     drawPart(
       cylinderMesh,
-      mult(base, translate(0, TREE_TRUNK_HEIGHT / 2, 0)),
-      cylinderScale(TREE_TRUNK_RADIUS, TREE_TRUNK_HEIGHT),
+      trunk,
+      cylinderSize(TREE_TRUNK_RADIUS, TREE_TRUNK_HEIGHT),
       TRUNK_COLOR,
       0.1,
     );
@@ -559,7 +639,13 @@ function drawScene() {
     let size = TREE_LEAF_SIZE;
     for (let i = 0; i < TREE_LEAF_LAYERS; i++) {
       const y = TREE_TRUNK_HEIGHT + size[1] / 2 + i * TREE_LEAF_STEP;
-      drawPart(coneMesh, mult(base, translate(0, y, 0)), coneScale(size), LEAF_COLOR, 0.15);
+      drawPart(
+        coneMesh,
+        mult(base, translate(0, y, 0)),
+        size,
+        LEAF_COLOR,
+        0.15,
+      );
       size = scale(TREE_LEAF_SHRINK, size);
     }
   });
@@ -569,13 +655,7 @@ function drawScene() {
       translate(crate.x, FLOOR_Y + crate.size / 2, crate.z),
       rotateY(crate.turn),
     );
-    drawPart(
-      boxMesh,
-      m,
-      boxScale(vec3(crate.size, crate.size, crate.size)),
-      CRATE_COLOR,
-      0.1,
-    );
+    drawPart(boxMesh, m, equalSize(crate.size), CRATE_COLOR, 0.1); // a cube: same size on every axis
   });
 }
 
@@ -583,14 +663,8 @@ function drawScene() {
 function drawLightMarker() {
   const preset = isNight ? NIGHT : DAY;
   gl.uniform1f(uUnlitLoc, 1.0);
-  drawPart(
-    sphereMesh,
-    translate(lightPosition[0], lightPosition[1], lightPosition[2]),
-    sphereScale(
-      vec3(LIGHT_MARKER_RADIUS, LIGHT_MARKER_RADIUS, LIGHT_MARKER_RADIUS),
-    ),
-    preset.marker,
-  );
+  const m = translate(lightPosition[0], lightPosition[1], lightPosition[2]);
+  drawPart(sphereMesh, m, equalSize(LIGHT_MARKER_RADIUS), preset.marker);
   gl.uniform1f(uUnlitLoc, 0.0);
 }
 
@@ -607,13 +681,7 @@ function drawCat() {
 
   // body
   const body = mult(root, translate(0, CAT_BODY_CENTER_Y + catBob, 0));
-  drawPart(
-    sphereMesh,
-    body,
-    sphereScale(CAT_BODY_RADII),
-    CAT_COLOR,
-    CAT_SPEC_STRENGTH,
-  );
+  drawCatPart(sphereMesh, body, CAT_BODY_RADII);
 
   // arms (side = -1 or +1 mirrors everything left/right)
   [-1, 1].forEach(function (side) {
@@ -621,24 +689,12 @@ function drawCat() {
       body,
       translate(side * CAT_ARM_OFFSET[0], CAT_ARM_OFFSET[1], CAT_ARM_OFFSET[2]),
     );
-    drawPart(
-      sphereMesh,
-      arm,
-      sphereScale(CAT_ARM_RADII),
-      CAT_COLOR,
-      CAT_SPEC_STRENGTH,
-    );
+    drawCatPart(sphereMesh, arm, CAT_ARM_RADII);
   });
 
   // head
   const head = mult(body, translate(0, CAT_HEAD_OFFSET_Y, 0));
-  drawPart(
-    sphereMesh,
-    head,
-    sphereScale(CAT_HEAD_RADII),
-    CAT_COLOR,
-    CAT_SPEC_STRENGTH,
-  );
+  drawCatPart(sphereMesh, head, CAT_HEAD_RADII);
 
   [-1, 1].forEach(function (side) {
     // ears
@@ -653,25 +709,19 @@ function drawCat() {
       ),
       rotateZ(-side * CAT_EAR_TILT),
     );
-    drawPart(
-      coneMesh,
-      ear,
-      coneScale(CAT_EAR_SIZE),
-      CAT_COLOR,
-      CAT_SPEC_STRENGTH,
-    );
+    drawCatPart(coneMesh, ear, CAT_EAR_SIZE);
 
-    // eyes: white spheres, the pupil is painted on by the fragment shader (uPattern 2)
+    // eyes: white spheres, the pupil is painted on by the fragment shader (PATTERN_EYE)
     const eye = mult(
       head,
       translate(side * CAT_EYE_OFFSET[0], CAT_EYE_OFFSET[1], CAT_EYE_OFFSET[2]),
     );
     gl.uniform1f(uPatternLoc, PATTERN_EYE);
-    drawPart(sphereMesh, eye, sphereScale(CAT_EYE_RADII), EYE_COLOR, 0.9);
+    drawPart(sphereMesh, eye, CAT_EYE_RADII, EYE_COLOR, 0.9);
     gl.uniform1f(uPatternLoc, catPattern); // back to fur for the rest of the cat
   });
 
-  // legs: children of the root, not the body, so they stay planted when the body bobs later
+  // legs: children of the root, not the body, so they stay planted when the body bobs
   const legs = [
     { x: CAT_LEG_SPACING, angle: legAngleLeft },
     { x: -CAT_LEG_SPACING, angle: legAngleRight },
@@ -684,26 +734,19 @@ function drawCat() {
     );
 
     const legMatrix = mult(hip, translate(0, -CAT_LEG_LENGTH / 2, 0));
-    drawPart(
+    drawCatPart(
       cylinderMesh,
       legMatrix,
-      cylinderScale(CAT_LEG_RADIUS, CAT_LEG_LENGTH),
-      CAT_COLOR,
-      CAT_SPEC_STRENGTH,
+      cylinderSize(CAT_LEG_RADIUS, CAT_LEG_LENGTH),
     );
 
     const paw = mult(hip, translate(0, -CAT_LEG_LENGTH, CAT_PAW_FORWARD));
-    drawPart(
-      sphereMesh,
-      paw,
-      sphereScale(CAT_PAW_RADII),
-      CAT_COLOR,
-      CAT_SPEC_STRENGTH,
-    );
+    drawCatPart(sphereMesh, paw, CAT_PAW_RADII);
   });
 
   // tail: a chain, each segment bends a little more than the one before it
-  const tailBall = vec3(CAT_TAIL_RADIUS, CAT_TAIL_RADIUS, CAT_TAIL_RADIUS);
+  const tailBall = equalSize(CAT_TAIL_RADIUS);
+  const tailSegment = cylinderSize(CAT_TAIL_RADIUS, CAT_TAIL_SEGMENT_LENGTH);
   let joint = mult(
     mult(
       mult(
@@ -718,32 +761,14 @@ function drawCat() {
     if (i > 0) joint = mult(joint, rotateX(CAT_TAIL_BEND));
 
     // a ball at each joint fills the gap that opens on the outside of a bend
-    drawPart(
-      sphereMesh,
-      joint,
-      sphereScale(tailBall),
-      CAT_COLOR,
-      CAT_SPEC_STRENGTH,
-    );
+    drawCatPart(sphereMesh, joint, tailBall);
 
     const segment = mult(joint, translate(0, CAT_TAIL_SEGMENT_LENGTH / 2, 0));
-    drawPart(
-      cylinderMesh,
-      segment,
-      cylinderScale(CAT_TAIL_RADIUS, CAT_TAIL_SEGMENT_LENGTH),
-      CAT_COLOR,
-      CAT_SPEC_STRENGTH,
-    );
+    drawCatPart(cylinderMesh, segment, tailSegment);
 
     joint = mult(joint, translate(0, CAT_TAIL_SEGMENT_LENGTH, 0));
   }
-  drawPart(
-    sphereMesh,
-    joint,
-    sphereScale(tailBall),
-    CAT_COLOR,
-    CAT_SPEC_STRENGTH,
-  ); // rounded tip
+  drawCatPart(sphereMesh, joint, tailBall); // rounded tip
 
   gl.uniform1f(uPatternLoc, PATTERN_PLAIN); // don't leak the fur onto whatever draws next
 }
@@ -755,23 +780,17 @@ function buildShadowMatrix() {
   const h = FLOOR_Y + SHADOW_Y_OFFSET;
   const ly = lightPosition[1] - h; // light height measured from the shadow plane
 
+  // start from the identity (1s on the diagonal, 0s elsewhere) and change only what differs:
+  //   x' = ly*x - lx*y     y' = 0 (flat)     z' = ly*z - lz*y     w' = ly - y
+  // The GPU divides by w', which gives the point where the light ray hits the plane.
   const s = mat4();
   s[0][0] = ly;
   s[0][1] = -lx;
-  s[0][2] = 0;
-  s[0][3] = 0;
-  s[1][0] = 0;
   s[1][1] = 0;
-  s[1][2] = 0;
-  s[1][3] = 0; // y becomes 0: flat
-  s[2][0] = 0;
   s[2][1] = -lz;
   s[2][2] = ly;
-  s[2][3] = 0;
-  s[3][0] = 0;
   s[3][1] = -1;
-  s[3][2] = 0;
-  s[3][3] = ly; // w = ly - y
+  s[3][3] = ly;
 
   // shift the plane down to y = 0, project, shift back up
   return mult(translate(0, h, 0), mult(s, translate(0, -h, 0)));
@@ -906,7 +925,8 @@ function pushOutOfObstacles(p) {
       let d = Math.hypot(ox, oz);
       const r = o.radius + CAT_COLLISION_RADIUS;
       if (d >= r) return;
-      if (d < 1e-6) { // exactly on the center: pick any direction
+      if (d < 1e-6) {
+        // exactly on the center: pick any direction
         ox = 1;
         oz = 0;
         d = 1;
@@ -982,29 +1002,15 @@ function updateCamera() {
 // The shader works in eye space, so the world-space light must be moved
 // into eye space every frame (the camera moves, so the result changes).
 function uploadLight() {
-  const p = [lightPosition[0], lightPosition[1], lightPosition[2], 1.0];
-  const eyeLight = [];
-  for (let row = 0; row < 3; row++) {
-    eyeLight.push(
-      viewMatrix[row][0] * p[0] +
-        viewMatrix[row][1] * p[1] +
-        viewMatrix[row][2] * p[2] +
-        viewMatrix[row][3] * p[3],
-    );
-  }
-  gl.uniform3fv(uLightPosEyeLoc, new Float32Array(eyeLight));
+  // a position has w = 1, so the camera's translation applies as well as its rotation
+  const p = lightPosition;
+  const eyeLight = mult(viewMatrix, vec4(p[0], p[1], p[2], 1.0));
+  gl.uniform3fv(uLightPosEyeLoc, eyeLight.slice(0, 3));
 
   // the fill light is a direction (w = 0), so only the view's rotation applies
   const d = FILL_LIGHT_DIRECTION;
-  const eyeFill = [];
-  for (let row = 0; row < 3; row++) {
-    eyeFill.push(
-      viewMatrix[row][0] * d[0] +
-        viewMatrix[row][1] * d[1] +
-        viewMatrix[row][2] * d[2],
-    );
-  }
-  gl.uniform3fv(uFillDirEyeLoc, new Float32Array(eyeFill));
+  const eyeFill = mult(viewMatrix, vec4(d[0], d[1], d[2], 0.0));
+  gl.uniform3fv(uFillDirEyeLoc, eyeFill.slice(0, 3));
 }
 
 // Moves the light around the y axis when orbiting is on (L key).
@@ -1022,7 +1028,12 @@ function updateLight(dt) {
 // Sends the light colors and clear (sky) color for the current time of day.
 function applyTimeOfDay() {
   const preset = isNight ? NIGHT : DAY;
-  gl.clearColor(preset.clear[0], preset.clear[1], preset.clear[2], preset.clear[3]);
+  gl.clearColor(
+    preset.clear[0],
+    preset.clear[1],
+    preset.clear[2],
+    preset.clear[3],
+  );
   gl.uniform3fv(uAmbientLoc, flatten(preset.ambient));
   gl.uniform3fv(uDiffuseLoc, flatten(preset.diffuse));
   gl.uniform3fv(uFillColorLoc, flatten(preset.fill));
@@ -1149,18 +1160,10 @@ function onCanvasClick(clientX, clientY) {
   catAvoidSide = 0;
 }
 
-// Multiplies a 4x4 matrix by the point (x, y, z, 1), then divides by w.
+// Runs an NDC point backwards through `inv` (MV.js mult does matrix x vector), then divides by w.
 function unproject(inv, ndcX, ndcY, ndcZ) {
-  const v = [ndcX, ndcY, ndcZ, 1.0];
-  const out = [0, 0, 0, 0];
-  for (let row = 0; row < 4; row++) {
-    out[row] =
-      inv[row][0] * v[0] +
-      inv[row][1] * v[1] +
-      inv[row][2] * v[2] +
-      inv[row][3] * v[3];
-  }
-  return vec3(out[0] / out[3], out[1] / out[3], out[2] / out[3]);
+  const p = mult(inv, vec4(ndcX, ndcY, ndcZ, 1.0));
+  return vec3(p[0] / p[3], p[1] / p[3], p[2] / p[3]);
 }
 
 // Canvas pixel -> the click's ray in world space, as two points (near and far plane).
@@ -1245,10 +1248,14 @@ function render(now) {
   gl.uniform1f(uToonLevelsLoc, 0.0);
 
   if (catTarget !== null && catIsWalking) {
-    drawPart(cylinderMesh,
-             translate(catTarget[0], FLOOR_Y + 0.5, catTarget[2]),
-             cylinderScale(TARGET_MARKER_RADIUS, 1),
-             TARGET_MARKER_COLOR, 0.2);
+    const marker = translate(catTarget[0], FLOOR_Y + 0.5, catTarget[2]);
+    drawPart(
+      cylinderMesh,
+      marker,
+      cylinderSize(TARGET_MARKER_RADIUS, 1),
+      TARGET_MARKER_COLOR,
+      0.2,
+    );
   }
 
   requestAnimationFrame(render);
@@ -1419,38 +1426,4 @@ function makeCylinder(bottomRadius, topRadius, height, segments) {
   });
 
   return { positions, normals, texCoords, indices };
-}
-
-// Sphere stretched to different radii on each axis (body, head, paws, eyes).
-function makeEllipsoid(rx, ry, rz, latSegments, longSegments) {
-  const positions = [];
-  const normals = [];
-  const indices = [];
-
-  for (let i = 0; i <= latSegments; i++) {
-    const theta = (Math.PI * i) / latSegments;
-    const sinT = Math.sin(theta);
-    const cosT = Math.cos(theta);
-
-    for (let j = 0; j <= longSegments; j++) {
-      const phi = (2 * Math.PI * j) / longSegments;
-      const nx = sinT * Math.cos(phi);
-      const ny = cosT;
-      const nz = sinT * Math.sin(phi);
-
-      positions.push(vec3(rx * nx, ry * ny, rz * nz));
-      normals.push(normalize(vec3(nx / rx, ny / ry, nz / rz))); // not the same as the position direction
-    }
-  }
-
-  for (let i = 0; i < latSegments; i++) {
-    for (let j = 0; j < longSegments; j++) {
-      const first = i * (longSegments + 1) + j;
-      const second = first + longSegments + 1;
-      indices.push(first, second, first + 1);
-      indices.push(second, second + 1, first + 1);
-    }
-  }
-
-  return { positions, normals, indices };
 }

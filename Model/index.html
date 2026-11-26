@@ -1,14 +1,46 @@
 <!doctype html>
 <html>
+  <head>
+    <style>
+      body {
+        text-align: center;
+      }
+      canvas {
+        display: block;
+        margin: 8px auto 0;
+      }
+    </style>
+  </head>
   <body>
     <h1>CSCI336 Interactive Computer Graphics</h1>
-    <p>Assesment 03 - Interactive Animated Project</p>
-    <p>Student Name : Muhammad Finan Noufal, Student ID - 8860750</p>
-    <p>Title - A non NDC Cat in Webgl with help of Common File</p>
-    <p>Interaction - Click the floor to make the cat walk (it steers around the crates and trees), click the cat to make it jump, drag to orbit, scroll to zoom</p>
-    <p>Animation - Cat's legs swing as it walks, tail sways, jumps when clicked</p>
-    <p>Advanced Tasks - Phong and Blinn-Phong lighting (toggle) with fill light, rim light, toon shading, procedural eyes, grass image texture on the floor (mipmaps, anisotropic filtering, two-scale anti-tiling), fur image texture on the cat, distance fog, procedural checkerboard floor, planar stencil shadow, hierarchical model</p>
-    <p>Keys - R reset camera, C grass texture / checkerboard, F fur on/off, B Blinn-Phong / Phong, M fog on/off, S shadow on/off, G rim light on/off, T toon shading on/off, L orbit the light, N day/night</p>
+    <h2><strong>Assessment 03:</strong> Interactive Animated Project</h2>
+    <p>
+      <strong>Student Name:</strong> Muhammad Finan Noufal |
+      <strong>Student ID:</strong> 8860750
+    </p>
+    <p></p>
+    <p><strong>Title:</strong> A non-NDC Cat in WebGL using the Common files</p>
+    <p>
+      <strong>Interaction:</strong> Click the floor to make the cat walk (it
+      steers around the crates and trees), click the cat to make it jump, drag
+      to orbit, scroll to zoom
+    </p>
+    <p>
+      <strong>Animation:</strong> Cat's legs swing as it walks, tail sways,
+      jumps when clicked
+    </p>
+    <p>
+      <strong>Advanced Tasks:</strong> Phong and Blinn-Phong lighting (toggle)
+      with fill light, rim light, toon shading, procedural eyes, grass image
+      texture on the floor (mipmaps, anisotropic filtering, two-scale
+      anti-tiling), fur image texture on the cat, distance fog, procedural
+      checkerboard floor, planar stencil shadow, hierarchical model
+    </p>
+    <p>
+      <strong>Keys:</strong> R reset camera, C grass texture / checkerboard, F
+      fur on/off, B Blinn-Phong / Phong, M fog on/off, S shadow on/off, G rim
+      light on/off, T toon shading on/off, L orbit the light, N day/night
+    </p>
     <canvas id="gl-canvas" width="580" height="580"> </canvas>
     <script id="vertex-shader" type="x-shader/x-vertex">
       #version 300 es
@@ -166,7 +198,6 @@
         fragColor = vec4(color, uColor.a);
       }
     </script>
-
   </body>
   <script type="text/javascript" src="../Common/initShaders.js"></script>
   <script type="text/javascript" src="../Common/MV.js"></script>
